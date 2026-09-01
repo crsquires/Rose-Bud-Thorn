@@ -13,11 +13,17 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // --- Auth helpers ---
 export async function signInWithEmail(email) {
-  return supabase.auth.signInWithOtp({ email })
+  return supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: window.location.origin },
+  })
 }
 
 export async function signInWithGoogle() {
-  return supabase.auth.signInWithOAuth({ provider: 'google' })
+  return supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin },
+  })
 }
 
 export async function getCurrentUser() {
