@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut } from "lucide-react";
+import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
 
 function hexToRgba(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
@@ -214,8 +215,11 @@ function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInb
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
 
       <div className="w-full flex flex-col items-center px-6" style={{ maxWidth: "480px" }}>
-        {/* header row: inbox (right) */}
-        <div className="w-full flex items-center justify-end mt-6">
+        {/* header row: sign out (left) + inbox (right) */}
+        <div className="w-full flex items-center justify-between mt-6">
+          <button onClick={() => signOut()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
+            <LogOut size={13} color="rgba(43,42,31,0.5)" />
+          </button>
           <button onClick={onOpenInbox} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
             {inboxDone && <CheckCircle2 size={13} color="#4B5E33" />}
             <Inbox size={14} color="rgba(43,42,31,0.55)" />
@@ -305,11 +309,120 @@ function InboxScreen({ onBack }) {
   );
 }
 
+function AuthScreen() {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleEmailSignIn = async (e) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setLoading(true);
+    setError(null);
+    const { error } = await signInWithEmail(email.trim());
+    setLoading(false);
+    if (error) setError(error.message);
+    else setSent(true);
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    const { error } = await signInWithGoogle();
+    if (error) setError(error.message);
+    // on success, browser redirects to Google — no further code runs here
+  };
+
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
+
+      <div className="flex items-center justify-center gap-1 mb-2 w-full mx-auto" style={{ maxWidth: "300px" }}>
+        <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
+        <img src={WORD_IMG.bud} alt="Bud" style={{ width: "30%", height: "auto", transform: "translateY(14px) rotate(3deg)" }} />
+        <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
+      </div>
+
+      <p className="text-[15px] mb-8" style={{ color: hexToRgba(ENTRY_INK, 0.7), fontFamily: "'Permanent Marker', cursive" }}>
+        Connect with a friend today
+      </p>
+
+      {sent ? (
+        <div className="w-full text-center" style={{ maxWidth: "320px" }}>
+          <Mail size={22} color={ENTRY_INK} style={{ margin: "0 auto 12px" }} />
+          <p className="text-[14px] leading-relaxed" style={{ color: "rgba(43,42,31,0.75)", fontFamily: "'Fraunces', serif" }}>
+            Check <strong>{email}</strong> for a sign-in link.
+          </p>
+        </div>
+      ) : (
+        <div className="w-full" style={{ maxWidth: "320px" }}>
+          <form onSubmit={handleEmailSignIn} className="w-full">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="your@email.com"
+              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-3"
+              style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+            />
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}
+            >
+              {loading ? "SENDING\u2026" : "SIGN IN WITH EMAIL"}
+            </button>
+          </form>
+
+          <div className="flex items-center gap-3 my-4">
+            <div className="flex-1 h-px" style={{ background: "rgba(43,42,31,0.15)" }} />
+            <span className="text-[10px] tracking-widest" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>OR</span>
+            <div className="flex-1 h-px" style={{ background: "rgba(43,42,31,0.15)" }} />
+          </div>
+
+          <button
+            onClick={handleGoogleSignIn}
+            className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+            style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+          >
+            CONTINUE WITH GOOGLE
+          </button>
+
+          {error && (
+            <p className="text-[12px] text-center mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
+              {error}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
+  const [session, setSession] = useState(undefined); // undefined = still checking, null = logged out
   const [stage, setStage] = useState("home"); // home | inbox | cards
   const [cardEntries, setCardEntries] = useState({ rose: "", bud: "", thorn: "" });
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
   const filledCount = Object.values(cardEntries).filter((v) => v.trim().length > 0).length;
+
+  // still checking for an existing session — avoid flashing the login screen
+  if (session === undefined) {
+    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
+  }
+
+  if (!session) {
+    return <AuthScreen />;
+  }
 
   if (stage === "inbox") {
     return <InboxScreen onBack={() => setStage("home")} />;
