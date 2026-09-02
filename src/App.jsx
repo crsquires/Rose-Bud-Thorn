@@ -300,6 +300,7 @@ function InboxScreen({ onBack }) {
 }
 
 function AuthScreen() {
+  const [showEmail, setShowEmail] = useState(false);
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState(null);
@@ -345,38 +346,47 @@ function AuthScreen() {
         </div>
       ) : (
         <div className="w-full" style={{ maxWidth: "320px" }}>
-          <form onSubmit={handleEmailSignIn} className="w-full">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="your@email.com"
-              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-3"
-              style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
-            />
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
-              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}
-            >
-              {loading ? "SENDING\u2026" : "SIGN IN WITH EMAIL"}
-            </button>
-          </form>
-
-          <div className="flex items-center gap-3 my-4">
-            <div className="flex-1 h-px" style={{ background: "rgba(43,42,31,0.15)" }} />
-            <span className="text-[10px] tracking-widest" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>OR</span>
-            <div className="flex-1 h-px" style={{ background: "rgba(43,42,31,0.15)" }} />
-          </div>
-
           <button
             onClick={handleGoogleSignIn}
             className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
-            style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}
           >
             CONTINUE WITH GOOGLE
           </button>
+
+          {!showEmail ? (
+            <button
+              onClick={() => setShowEmail(true)}
+              className="w-full text-center mt-4 text-[11px] underline"
+              style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}
+            >
+              or sign in with email instead
+            </button>
+          ) : (
+            <div className="mt-4">
+              <p className="text-[11px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
+                We'll email you a one-time link — no password needed. You'll need to open your inbox and tap it to finish signing in.
+              </p>
+              <form onSubmit={handleEmailSignIn} className="w-full">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your@email.com"
+                  className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-3"
+                  style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
+                  style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+                >
+                  {loading ? "SENDING\u2026" : "SEND SIGN-IN LINK"}
+                </button>
+              </form>
+            </div>
+          )}
 
           {error && (
             <p className="text-[12px] text-center mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
