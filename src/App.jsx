@@ -287,118 +287,71 @@ function SendScreen({ userId, groupId, onDone }) {
   const [circles, setCircles] = useState(null);
   const [mode, setMode] = useState("list");
   const [newName, setNewName] = useState("");
-  const [people, setPeople] = useState([{ name: "", phone: "" }]);
-  const [sending, setSending] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
-  const [sentLinks, setSentLinks] = useState(null);
+  const [activeLink, setActiveLink] = useState(null);
 
   useEffect(() => {
     supabase
       .from("circles")
-      .select("id, name, circle_members(id, display_name)")
+      .select("id, name, invite_token, circle_members(id)")
       .eq("owner_id", userId)
       .order("created_at", { ascending: false })
       .then(({ data }) => setCircles(data || []));
   }, [userId]);
 
-  const updatePerson = (i, field, value) => {
-    setPeople((p) => p.map((person, idx) => (idx === i ? { ...person, [field]: value } : person)));
-  };
-  const addPersonRow = () => setPeople((p) => [...p, { name: "", phone: "" }]);
-  const removePersonRow = (i) => setPeople((p) => p.filter((_, idx) => idx !== i));
+  const buildLink = (circleToken) => `${window.location.origin}/invite/${circleToken}?checkin=${groupId}`;
 
-  const buildInviteLink = (token) => `${window.location.origin}/invite/${token}`;
-
-  const sendToMembers = async (memberRows) => {
-    for (const m of memberRows) {
-      await supabase.from("group_members").insert({
-        group_id: groupId,
-        user_id: m.user_id || null,
-        invite_token: m.invite_token,
-      });
-    }
-    setSentLinks(
-      memberRows.map((m) => ({ name: m.display_name, phone: m.phone, url: buildInviteLink(m.invite_token) }))
-    );
+  const openCircle = (circle) => {
+    setActiveLink({ name: circle.name, url: buildLink(circle.invite_token) });
   };
 
-  const handleSendToCircle = async (circle) => {
-    setSending(true);
+  const handleCreate = async () => {
+    setCreating(true);
     setError(null);
-    const { data: members, error: memErr } = await supabase
-      .from("circle_members")
-      .select("*")
-      .eq("circle_id", circle.id);
-    if (memErr) {
-      setSending(false);
-      setError(memErr.message);
-      return;
-    }
-    await sendToMembers(members);
-    setSending(false);
-  };
-
-  const handleCreateAndSend = async () => {
-    const validPeople = people.filter((p) => p.name.trim());
-    if (validPeople.length === 0) {
-      setError("Add at least one person.");
-      return;
-    }
-    const finalName = newName.trim() || validPeople.map((p) => p.name.trim()).join(", ");
-    setSending(true);
-    setError(null);
-
     const { data: circle, error: circleErr } = await supabase
       .from("circles")
-      .insert({ owner_id: userId, name: finalName })
+      .insert({ owner_id: userId, name: newName.trim() || "New group" })
       .select()
       .single();
+    setCreating(false);
     if (circleErr) {
-      setSending(false);
       setError(circleErr.message);
       return;
     }
-
-    const rows = validPeople.map((p) => ({
-      circle_id: circle.id,
-      display_name: p.name.trim(),
-      phone: p.phone.trim() || null,
-    }));
-    const { data: members, error: memErr } = await supabase.from("circle_members").insert(rows).select();
-    if (memErr) {
-      setSending(false);
-      setError(memErr.message);
-      return;
-    }
-
-    await sendToMembers(members);
-    setSending(false);
+    setActiveLink({ name: circle.name, url: buildLink(circle.invite_token) });
   };
 
-  const shareLink = (person) => {
-    const msg = `How was your day? I want to hear about it \u2014 join me on Rose, Bud, Thorn: ${person.url}`;
-    if (person.phone) {
-      window.location.href = `sms:${person.phone}&body=${encodeURIComponent(msg)}`;
-    } else if (navigator.share) {
-      navigator.share({ text: msg });
+  const shareLink = async () => {
+    const msg = `How was your day? I want to hear about it \u2014 join me on Rose, Bud, Thorn: ${activeLink.url}`;
+    if (navigator.share) {
+      try { await navigator.share({ text: msg }); } catch {}
     } else {
-      navigator.clipboard.writeText(msg);
+      await navigator.clipboard.writeText(msg);
+      alert("Link copied \u2014 paste it anywhere to send.");
     }
   };
 
-  if (sentLinks) {
+  if (activeLink) {
     return (
       <div className="min-h-screen w-full flex flex-col items-center justify-center px-6" style={{ background: "#EFE9DA" }}>
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
-        <div className="w-full" style={{ maxWidth: "360px" }}>
-          <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Invites ready</h1>
-          <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Send each link so they can join and post their own rose, bud & thorn.</p>
-          {sentLinks.map((p, i) => (
-            <div key={i} className="flex items-center justify-between mb-3 px-4 py-3 rounded-full" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)" }}>
-              <span className="text-[13px]" style={{ color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}>{p.name}</span>
-              <button onClick={() => shareLink(p)} className="text-[11px] font-bold px-3 py-1.5 rounded-full" style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>SEND</button>
-            </div>
-          ))}
+        <div className="w-full text-center" style={{ maxWidth: "340px" }}>
+          <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>{activeLink.name}</h1>
+          <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
+            Share this link with anyone you want in this check-in. No typing needed — they'll join with their own name once they sign in.
+          </p>
+          <button onClick={shareLink} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide mb-3"
+            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+            SHARE LINK
+          </button>
+          <button
+            onClick={() => { navigator.clipboard.writeText(activeLink.url); alert("Copied!"); }}
+            className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+            style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+          >
+            COPY LINK
+          </button>
           <button onClick={onDone} className="w-full mt-6 text-[12px] underline" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>Done</button>
         </div>
       </div>
@@ -410,7 +363,7 @@ function SendScreen({ userId, groupId, onDone }) {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
       <div className="w-full" style={{ maxWidth: "360px" }}>
         <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Send this check-in</h1>
-        <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Pick a saved group, or send to someone new — even just one friend is fine.</p>
+        <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Pick a saved group, or create a new link — even just one friend is fine.</p>
 
         {mode === "list" && (
           <>
@@ -420,16 +373,16 @@ function SendScreen({ userId, groupId, onDone }) {
               <p className="text-[12px] mb-4" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>No saved groups yet.</p>
             ) : (
               circles.map((c) => (
-                <button key={c.id} onClick={() => handleSendToCircle(c)} disabled={sending}
-                  className="w-full flex items-center justify-between mb-3 px-4 py-3 rounded-full disabled:opacity-50" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)" }}>
+                <button key={c.id} onClick={() => openCircle(c)}
+                  className="w-full flex items-center justify-between mb-3 px-4 py-3 rounded-full" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)" }}>
                   <span className="text-[13px]" style={{ color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}>{c.name}</span>
-                  <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>{c.circle_members?.length || 0} people</span>
+                  <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>{c.circle_members?.length || 0} joined</span>
                 </button>
               ))
             )}
             <button onClick={() => setMode("new")} className="w-full mt-2 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
               style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              + ADD PEOPLE
+              + NEW LINK
             </button>
           </>
         )}
@@ -443,32 +396,9 @@ function SendScreen({ userId, groupId, onDone }) {
               className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-4"
               style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
             />
-            {people.map((p, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <input
-                  value={p.name}
-                  onChange={(e) => updatePerson(i, "name", e.target.value)}
-                  placeholder="Name"
-                  className="flex-1 px-3 py-2 rounded-full text-[12px] outline-none"
-                  style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
-                />
-                <input
-                  value={p.phone}
-                  onChange={(e) => updatePerson(i, "phone", e.target.value)}
-                  placeholder="Phone (optional)"
-                  className="flex-1 px-3 py-2 rounded-full text-[12px] outline-none"
-                  style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
-                />
-                {people.length > 1 && (
-                  <button onClick={() => removePersonRow(i)} className="text-[16px] px-2" style={{ color: "rgba(43,42,31,0.4)" }}>&times;</button>
-                )}
-              </div>
-            ))}
-            <button onClick={addPersonRow} className="text-[11px] underline mb-4" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>+ add another person</button>
-
-            <button onClick={handleCreateAndSend} disabled={sending} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
+            <button onClick={handleCreate} disabled={creating} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
               style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              {sending ? "SAVING\u2026" : "SAVE & SEND"}
+              {creating ? "CREATING\u2026" : "CREATE & GET LINK"}
             </button>
             <button onClick={() => setMode("list")} className="w-full mt-3 text-[11px] underline" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>back to saved groups</button>
           </>
@@ -664,6 +594,25 @@ function AuthScreen() {
   );
 }
 
+function DesktopBlockScreen() {
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Permanent+Marker&display=swap');`}</style>
+      <div className="flex items-center justify-center gap-1 mb-6 w-full mx-auto" style={{ maxWidth: "300px" }}>
+        <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
+        <img src={WORD_IMG.bud} alt="Bud" style={{ width: "30%", height: "auto", transform: "translateY(14px) rotate(3deg)" }} />
+        <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
+      </div>
+      <p className="text-[16px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Permanent Marker', cursive" }}>
+        This one's meant for your phone
+      </p>
+      <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif", maxWidth: "300px" }}>
+        Rose, Bud, Thorn is built for quick daily check-ins on the go. Open this page on your phone to get started.
+      </p>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [stage, setStage] = useState("home");
@@ -671,6 +620,14 @@ export default function App() {
   const [groupId, setGroupId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [joinError, setJoinError] = useState(null);
+
+  const [pendingInvite] = useState(() => {
+    const match = window.location.pathname.match(/^\/invite\/([^/]+)/);
+    if (!match) return null;
+    const params = new URLSearchParams(window.location.search);
+    return { circleToken: match[1], checkinGroupId: params.get("checkin") };
+  });
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -679,6 +636,45 @@ export default function App() {
     });
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!session || !pendingInvite) return;
+
+    (async () => {
+      setStage("joining");
+      setJoinError(null);
+
+      const { data: circle, error: circleErr } = await supabase
+        .from("circles")
+        .select("id")
+        .eq("invite_token", pendingInvite.circleToken)
+        .single();
+
+      if (circleErr || !circle) {
+        setJoinError("This invite link isn't valid.");
+        return;
+      }
+
+      const displayName = session.user.email?.split("@")[0] || "Friend";
+
+      await supabase.from("circle_members").upsert(
+        { circle_id: circle.id, user_id: session.user.id, display_name: displayName },
+        { onConflict: "circle_id,user_id" }
+      );
+
+      if (pendingInvite.checkinGroupId) {
+        await supabase.from("group_members").insert({
+          group_id: pendingInvite.checkinGroupId,
+          user_id: session.user.id,
+          invite_token: crypto.randomUUID(),
+          joined_at: new Date().toISOString(),
+        });
+      }
+
+      window.history.replaceState({}, "", "/");
+      setStage("home");
+    })();
+  }, [session, pendingInvite]);
 
   const filledCount = Object.values(cardEntries).filter((v) => v.trim().length > 0).length;
 
@@ -747,12 +743,35 @@ export default function App() {
     setStage("send");
   };
 
+  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (!isMobile) {
+    return <DesktopBlockScreen />;
+  }
+
   if (session === undefined) {
     return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
   }
 
   if (!session) {
     return <AuthScreen />;
+  }
+
+  if (stage === "joining") {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&display=swap');`}</style>
+        {joinError ? (
+          <>
+            <p className="text-[14px] mb-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{joinError}</p>
+            <button onClick={() => { window.history.replaceState({}, "", "/"); setStage("home"); }} className="text-[12px] underline" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
+              Go to home
+            </button>
+          </>
+        ) : (
+          <p className="text-[14px]" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Joining\u2026</p>
+        )}
+      </div>
+    );
   }
 
   if (stage === "inbox") {
