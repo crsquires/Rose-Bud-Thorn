@@ -340,16 +340,17 @@ function SendScreen({ userId, groupId, onDone }) {
 
   const handleCreateAndSend = async () => {
     const validPeople = people.filter((p) => p.name.trim());
-    if (!newName.trim() || validPeople.length === 0) {
-      setError("Give the group a name and add at least one person.");
+    if (validPeople.length === 0) {
+      setError("Add at least one person.");
       return;
     }
+    const finalName = newName.trim() || validPeople.map((p) => p.name.trim()).join(", ");
     setSending(true);
     setError(null);
 
     const { data: circle, error: circleErr } = await supabase
       .from("circles")
-      .insert({ owner_id: userId, name: newName.trim() })
+      .insert({ owner_id: userId, name: finalName })
       .select()
       .single();
     if (circleErr) {
@@ -387,7 +388,7 @@ function SendScreen({ userId, groupId, onDone }) {
 
   if (sentLinks) {
     return (
-      <div className="min-h-screen w-full flex flex-col items-center px-6 pt-10" style={{ background: "#EFE9DA" }}>
+      <div className="min-h-screen w-full flex flex-col items-center justify-center px-6" style={{ background: "#EFE9DA" }}>
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
         <div className="w-full" style={{ maxWidth: "360px" }}>
           <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Invites ready</h1>
@@ -405,11 +406,11 @@ function SendScreen({ userId, groupId, onDone }) {
   }
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-10" style={{ background: "#EFE9DA" }}>
+    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
       <div className="w-full" style={{ maxWidth: "360px" }}>
         <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Send this check-in</h1>
-        <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Pick a saved group, or start a new one.</p>
+        <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Pick a saved group, or send to someone new — even just one friend is fine.</p>
 
         {mode === "list" && (
           <>
@@ -428,7 +429,7 @@ function SendScreen({ userId, groupId, onDone }) {
             )}
             <button onClick={() => setMode("new")} className="w-full mt-2 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
               style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              + NEW GROUP
+              + ADD PEOPLE
             </button>
           </>
         )}
@@ -438,7 +439,7 @@ function SendScreen({ userId, groupId, onDone }) {
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder={'Group name (e.g. "College Friends")'}
+              placeholder={'Name it (optional — e.g. "College Friends")'}
               className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-4"
               style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
             />
