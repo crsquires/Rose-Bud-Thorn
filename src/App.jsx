@@ -481,17 +481,83 @@ function SendScreen({ userId, groupId, onDone }) {
   );
 }
 
-function InboxScreen({ onBack }) {
+const TYPE_LABELS = { rose: "ROSE", bud: "BUD", thorn: "THORN" };
+const TYPE_INK = { rose: "#8C2F45", bud: "#4B5E33", thorn: "#7A4A28" };
+
+function InboxScreen({ userId, onBack }) {
+  const [checkins, setCheckins] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const { data: memberships } = await supabase
+        .from("group_members")
+        .select("group_id, groups(id, created_at, expires_at, created_by)")
+        .eq("user_id", userId);
+
+      const groups = (memberships || [])
+        .map((m) => m.groups)
+        .filter((g) => g && new Date(g.expires_at) > new Date())
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      const withCards = await Promise.all(
+        groups.map(async (g) => {
+          const { data: cards } = await supabase
+            .from("cards")
+            .select("type, content, user_id, created_at")
+            .eq("group_id", g.id)
+            .order("created_at", { ascending: true });
+          return { ...g, cards: cards || [] };
+        })
+      );
+
+      if (!cancelled) setCheckins(withCards);
+    })();
+
+    return () => { cancelled = true; };
+  }, [userId]);
+
   return (
     <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
       <div className="w-full max-w-md">
         <button onClick={onBack} className="flex items-center gap-1 text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
           <ChevronLeft size={14} /> BACK TO HOME
         </button>
         <h1 className="text-[22px] mb-2" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Inbox</h1>
-        <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-          Nothing here yet. You'll only hear from people already in your contacts — invite a friend to start your first exchange.
-        </p>
+
+        {checkins === null ? (
+          <p className="text-[13px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading\u2026</p>
+        ) : checkins.length === 0 ? (
+          <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
+            Nothing here yet. Start a check-in and send it to a group to see answers appear here as people post.
+          </p>
+        ) : (
+          checkins.map((g) => (
+            <div key={g.id} className="mb-6 pb-6" style={{ borderBottom: "1px solid rgba(43,42,31,0.1)" }}>
+              <p className="text-[10px] tracking-wide mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+                {new Date(g.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </p>
+              {g.cards.length === 0 ? (
+                <p className="text-[12px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif", fontStyle: "italic" }}>
+                  No answers posted yet.
+                </p>
+              ) : (
+                g.cards.map((c, i) => (
+                  <div key={i} className="mb-3">
+                    <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
+                      {TYPE_LABELS[c.type]} {c.user_id === userId ? "(You)" : ""}
+                    </span>
+                    <p className="text-[13px] leading-snug" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
+                      {c.content}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -689,7 +755,7 @@ export default function App() {
   }
 
   if (stage === "inbox") {
-    return <InboxScreen onBack={() => setStage("home")} />;
+    return <InboxScreen userId={session.user.id} onBack={() => setStage("home")} />;
   }
 
   if (stage === "cards") {
