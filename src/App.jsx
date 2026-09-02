@@ -283,6 +283,204 @@ function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInb
   );
 }
 
+function SendScreen({ userId, groupId, onDone }) {
+  const [circles, setCircles] = useState(null);
+  const [mode, setMode] = useState("list");
+  const [newName, setNewName] = useState("");
+  const [people, setPeople] = useState([{ name: "", phone: "" }]);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState(null);
+  const [sentLinks, setSentLinks] = useState(null);
+
+  useEffect(() => {
+    supabase
+      .from("circles")
+      .select("id, name, circle_members(id, display_name)")
+      .eq("owner_id", userId)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => setCircles(data || []));
+  }, [userId]);
+
+  const updatePerson = (i, field, value) => {
+    setPeople((p) => p.map((person, idx) => (idx === i ? { ...person, [field]: value } : person)));
+  };
+  const addPersonRow = () => setPeople((p) => [...p, { name: "", phone: "" }]);
+  const removePersonRow = (i) => setPeople((p) => p.filter((_, idx) => idx !== i));
+
+  const buildInviteLink = (token) => `${window.location.origin}/invite/${token}`;
+
+  const sendToMembers = async (memberRows) => {
+    for (const m of memberRows) {
+      await supabase.from("group_members").insert({
+        group_id: groupId,
+        user_id: m.user_id || null,
+        invite_token: m.invite_token,
+      });
+    }
+    setSentLinks(
+      memberRows.map((m) => ({ name: m.display_name, phone: m.phone, url: buildInviteLink(m.invite_token) }))
+    );
+  };
+
+  const handleSendToCircle = async (circle) => {
+    setSending(true);
+    setError(null);
+    const { data: members, error: memErr } = await supabase
+      .from("circle_members")
+      .select("*")
+      .eq("circle_id", circle.id);
+    if (memErr) {
+      setSending(false);
+      setError(memErr.message);
+      return;
+    }
+    await sendToMembers(members);
+    setSending(false);
+  };
+
+  const handleCreateAndSend = async () => {
+    const validPeople = people.filter((p) => p.name.trim());
+    if (!newName.trim() || validPeople.length === 0) {
+      setError("Give the group a name and add at least one person.");
+      return;
+    }
+    setSending(true);
+    setError(null);
+
+    const { data: circle, error: circleErr } = await supabase
+      .from("circles")
+      .insert({ owner_id: userId, name: newName.trim() })
+      .select()
+      .single();
+    if (circleErr) {
+      setSending(false);
+      setError(circleErr.message);
+      return;
+    }
+
+    const rows = validPeople.map((p) => ({
+      circle_id: circle.id,
+      display_name: p.name.trim(),
+      phone: p.phone.trim() || null,
+    }));
+    const { data: members, error: memErr } = await supabase.from("circle_members").insert(rows).select();
+    if (memErr) {
+      setSending(false);
+      setError(memErr.message);
+      return;
+    }
+
+    await sendToMembers(members);
+    setSending(false);
+  };
+
+  const shareLink = (person) => {
+    const msg = `How was your day? I want to hear about it \u2014 join me on Rose, Bud, Thorn: ${person.url}`;
+    if (person.phone) {
+      window.location.href = `sms:${person.phone}&body=${encodeURIComponent(msg)}`;
+    } else if (navigator.share) {
+      navigator.share({ text: msg });
+    } else {
+      navigator.clipboard.writeText(msg);
+    }
+  };
+
+  if (sentLinks) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center px-6 pt-10" style={{ background: "#EFE9DA" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
+        <div className="w-full" style={{ maxWidth: "360px" }}>
+          <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Invites ready</h1>
+          <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Send each link so they can join and post their own rose, bud & thorn.</p>
+          {sentLinks.map((p, i) => (
+            <div key={i} className="flex items-center justify-between mb-3 px-4 py-3 rounded-full" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)" }}>
+              <span className="text-[13px]" style={{ color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}>{p.name}</span>
+              <button onClick={() => shareLink(p)} className="text-[11px] font-bold px-3 py-1.5 rounded-full" style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>SEND</button>
+            </div>
+          ))}
+          <button onClick={onDone} className="w-full mt-6 text-[12px] underline" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>Done</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-10" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
+      <div className="w-full" style={{ maxWidth: "360px" }}>
+        <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Send this check-in</h1>
+        <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Pick a saved group, or start a new one.</p>
+
+        {mode === "list" && (
+          <>
+            {circles === null ? (
+              <p className="text-[12px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading\u2026</p>
+            ) : circles.length === 0 ? (
+              <p className="text-[12px] mb-4" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>No saved groups yet.</p>
+            ) : (
+              circles.map((c) => (
+                <button key={c.id} onClick={() => handleSendToCircle(c)} disabled={sending}
+                  className="w-full flex items-center justify-between mb-3 px-4 py-3 rounded-full disabled:opacity-50" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)" }}>
+                  <span className="text-[13px]" style={{ color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}>{c.name}</span>
+                  <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>{c.circle_members?.length || 0} people</span>
+                </button>
+              ))
+            )}
+            <button onClick={() => setMode("new")} className="w-full mt-2 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+              + NEW GROUP
+            </button>
+          </>
+        )}
+
+        {mode === "new" && (
+          <>
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder={'Group name (e.g. "College Friends")'}
+              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-4"
+              style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+            />
+            {people.map((p, i) => (
+              <div key={i} className="flex gap-2 mb-2">
+                <input
+                  value={p.name}
+                  onChange={(e) => updatePerson(i, "name", e.target.value)}
+                  placeholder="Name"
+                  className="flex-1 px-3 py-2 rounded-full text-[12px] outline-none"
+                  style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+                />
+                <input
+                  value={p.phone}
+                  onChange={(e) => updatePerson(i, "phone", e.target.value)}
+                  placeholder="Phone (optional)"
+                  className="flex-1 px-3 py-2 rounded-full text-[12px] outline-none"
+                  style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+                />
+                {people.length > 1 && (
+                  <button onClick={() => removePersonRow(i)} className="text-[16px] px-2" style={{ color: "rgba(43,42,31,0.4)" }}>&times;</button>
+                )}
+              </div>
+            ))}
+            <button onClick={addPersonRow} className="text-[11px] underline mb-4" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>+ add another person</button>
+
+            <button onClick={handleCreateAndSend} disabled={sending} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+              {sending ? "SAVING\u2026" : "SAVE & SEND"}
+            </button>
+            <button onClick={() => setMode("list")} className="w-full mt-3 text-[11px] underline" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>back to saved groups</button>
+          </>
+        )}
+
+        {error && <p className="text-[12px] mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
+
+        <button onClick={onDone} className="w-full mt-6 text-[11px] underline" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>skip for now</button>
+      </div>
+    </div>
+  );
+}
+
 function InboxScreen({ onBack }) {
   return (
     <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8" style={{ background: "#EFE9DA" }}>
@@ -479,7 +677,7 @@ export default function App() {
       .eq("id", session.user.id);
 
     setSaving(false);
-    setStage("home");
+    setStage("send");
   };
 
   if (session === undefined) {
@@ -505,6 +703,10 @@ export default function App() {
         saveError={saveError}
       />
     );
+  }
+
+  if (stage === "send") {
+    return <SendScreen userId={session.user.id} groupId={groupId} onDone={() => setStage("home")} />;
   }
 
   return (
