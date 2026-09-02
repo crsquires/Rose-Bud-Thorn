@@ -137,7 +137,7 @@ function PostcardBack({ slide, index, value, onChange }) {
   );
 }
 
-function IntroCarousel({ onBegin, onGoHome, entries, setEntries }) {
+function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveError }) {
   const [index, setIndex] = useState(0);
   const [dragX, setDragX] = useState(0);
   const startX = useRef(null);
@@ -185,10 +185,15 @@ function IntroCarousel({ onBegin, onGoHome, entries, setEntries }) {
       </div>
 
       {index === INTRO_SLIDES.length - 1 && (
-        <button onClick={onBegin} className="mt-6 flex items-center gap-2 px-5 py-2.5 rounded-full text-[11px] font-bold tracking-wide"
-          style={{ background: "#2B2A1F", color: "#E9DCBE", fontFamily: "'Special Elite', monospace" }}>
-          BEGIN YOUR FIRST CHECK-IN <ArrowRight size={13} />
-        </button>
+        <div className="flex flex-col items-center">
+          <button onClick={onBegin} disabled={saving} className="mt-6 flex items-center gap-2 px-5 py-2.5 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-60"
+            style={{ background: "#2B2A1F", color: "#E9DCBE", fontFamily: "'Special Elite', monospace" }}>
+            {saving ? "SAVING\u2026" : (<>BEGIN YOUR FIRST CHECK-IN <ArrowRight size={13} /></>)}
+          </button>
+          {saveError && (
+            <p className="text-[11px] mt-2" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{saveError}</p>
+          )}
+        </div>
       )}
 
       <div className="w-full flex items-center justify-center gap-3 mt-6 mb-6" style={{ maxWidth: "640px" }}>
@@ -404,6 +409,9 @@ export default function App() {
   const [session, setSession] = useState(undefined); // undefined = still checking, null = logged out
   const [stage, setStage] = useState("home"); // home | inbox | cards
   const [cardEntries, setCardEntries] = useState({ rose: "", bud: "", thorn: "" });
+  const [groupId, setGroupId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -414,6 +422,75 @@ export default function App() {
   }, []);
 
   const filledCount = Object.values(cardEntries).filter((v) => v.trim().length > 0).length;
+
+  // starts a new check-in: creates a group (just this user, for now) and opens the writing flow
+  const startCheckIn = async () => {
+    setSaveError(null);
+    const { data, error } = await supabase
+      .from("groups")
+      .insert({ created_by: session.user.id })
+      .select()
+      .single();
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+
+    // add the creator as a member so RLS (which checks group_members) allows them to see/write cards
+    await supabase.from("group_members").insert({
+      group_id: data.id,
+      user_id: session.user.id,
+      invite_token: data.id, // creator doesn't need a separate invite token
+      joined_at: new Date().toISOString(),
+    });
+
+    setGroupId(data.id);
+    setCardEntries({ rose: "", bud: "", thorn: "" });
+    setStage("cards");
+  };
+
+  // saves all three cards to the database and bumps the user's fill_count
+  const finishCheckIn = async () => {
+    if (!groupId) {
+      setStage("home");
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+
+    const rows = Object.entries(cardEntries)
+      .filter(([, value]) => value.trim().length > 0)
+      .map(([type, content]) => ({
+        group_id: groupId,
+        user_id: session.user.id,
+        type,
+        content,
+      }));
+
+    const { error: cardsError } = await supabase.from("cards").insert(rows);
+
+    if (cardsError) {
+      setSaving(false);
+      setSaveError(cardsError.message);
+      return;
+    }
+
+    // fetch-then-update: simplest way to bump fill_count without a DB function
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("fill_count")
+      .eq("id", session.user.id)
+      .single();
+
+    await supabase
+      .from("users")
+      .update({ fill_count: (userRow?.fill_count ?? 0) + 1 })
+      .eq("id", session.user.id);
+
+    setSaving(false);
+    setStage("home");
+  };
 
   // still checking for an existing session — avoid flashing the login screen
   if (session === undefined) {
@@ -429,7 +506,16 @@ export default function App() {
   }
 
   if (stage === "cards") {
-    return <IntroCarousel entries={cardEntries} setEntries={setCardEntries} onBegin={() => setStage("home")} onGoHome={() => setStage("home")} />;
+    return (
+      <IntroCarousel
+        entries={cardEntries}
+        setEntries={setCardEntries}
+        onBegin={finishCheckIn}
+        onGoHome={() => setStage("home")}
+        saving={saving}
+        saveError={saveError}
+      />
+    );
   }
 
   return (
@@ -437,7 +523,7 @@ export default function App() {
       filledCount={filledCount}
       waitingCount={0}
       readCount={0}
-      onOpenCards={() => setStage("cards")}
+      onOpenCards={startCheckIn}
       onOpenInbox={() => setStage("inbox")}
     />
   );
