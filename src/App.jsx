@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Trash2 } from "lucide-react";
 import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
 import { STAMP_IMG, WORD_IMG } from "./assets";
 
@@ -284,12 +284,12 @@ function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInb
 }
 
 function SendScreen({ userId, groupId, onDone }) {
-  const [circles, setCircles] = useState(null);
-  const [mode, setMode] = useState("list");
+  const [circles, setCircles] = useState(null); // null = loading
+  const [mode, setMode] = useState("list"); // list | new
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
-  const [activeLink, setActiveLink] = useState(null);
+  const [activeLink, setActiveLink] = useState(null); // { name, url }
 
   useEffect(() => {
     supabase
@@ -304,6 +304,16 @@ function SendScreen({ userId, groupId, onDone }) {
 
   const openCircle = (circle) => {
     setActiveLink({ name: circle.name, url: buildLink(circle.invite_token) });
+  };
+
+  const deleteCircle = async (circle) => {
+    if (!window.confirm(`Remove "${circle.name}"? This can't be undone.`)) return;
+    const { error } = await supabase.from("circles").delete().eq("id", circle.id);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setCircles((prev) => prev.filter((c) => c.id !== circle.id));
   };
 
   const handleCreate = async () => {
@@ -373,11 +383,16 @@ function SendScreen({ userId, groupId, onDone }) {
               <p className="text-[12px] mb-4" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>No saved groups yet.</p>
             ) : (
               circles.map((c) => (
-                <button key={c.id} onClick={() => openCircle(c)}
-                  className="w-full flex items-center justify-between mb-3 px-4 py-3 rounded-full" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)" }}>
-                  <span className="text-[13px]" style={{ color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}>{c.name}</span>
-                  <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>{c.circle_members?.length || 0} joined</span>
-                </button>
+                <div key={c.id} className="w-full flex items-center gap-2 mb-3">
+                  <button onClick={() => openCircle(c)}
+                    className="flex-1 flex items-center justify-between px-4 py-3 rounded-full" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)" }}>
+                    <span className="text-[13px]" style={{ color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}>{c.name}</span>
+                    <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>{c.circle_members?.length || 0} joined</span>
+                  </button>
+                  <button onClick={() => deleteCircle(c)} className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(140,47,69,0.08)" }}>
+                    <Trash2 size={14} color="#8C2F45" />
+                  </button>
+                </div>
               ))
             )}
             <button onClick={() => setMode("new")} className="w-full mt-2 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
@@ -416,7 +431,7 @@ const TYPE_LABELS = { rose: "ROSE", bud: "BUD", thorn: "THORN" };
 const TYPE_INK = { rose: "#8C2F45", bud: "#4B5E33", thorn: "#7A4A28" };
 
 function InboxScreen({ userId, onBack }) {
-  const [checkins, setCheckins] = useState(null);
+  const [checkins, setCheckins] = useState(null); // null = loading
 
   useEffect(() => {
     let cancelled = false;
