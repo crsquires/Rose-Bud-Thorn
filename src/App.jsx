@@ -754,12 +754,16 @@ export default function App() {
       );
 
       if (pendingInvite.checkinGroupId) {
-        await supabase.from("group_members").insert({
+        const { error: joinInsertErr } = await supabase.from("group_members").insert({
           group_id: pendingInvite.checkinGroupId,
           user_id: session.user.id,
           invite_token: crypto.randomUUID(),
           joined_at: new Date().toISOString(),
         });
+        if (joinInsertErr) {
+          setJoinError(`Couldn't join this check-in: ${joinInsertErr.message}`);
+          return;
+        }
       }
 
       window.history.replaceState({}, "", "/");
