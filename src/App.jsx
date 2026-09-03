@@ -341,12 +341,12 @@ function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInb
 }
 
 function SendScreen({ userId, groupId, onDone }) {
-  const [circles, setCircles] = useState(null); // null = loading
-  const [mode, setMode] = useState("list"); // list | new
+  const [circles, setCircles] = useState(null);
+  const [mode, setMode] = useState("list");
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
-  const [activeLink, setActiveLink] = useState(null); // { name, url }
+  const [activeLink, setActiveLink] = useState(null);
 
   useEffect(() => {
     supabase
@@ -488,7 +488,8 @@ const TYPE_LABELS = { rose: "ROSE", bud: "BUD", thorn: "THORN" };
 const TYPE_INK = { rose: "#8C2F45", bud: "#4B5E33", thorn: "#7A4A28" };
 
 function InboxScreen({ userId, onBack }) {
-  const [checkins, setCheckins] = useState(null); // null = loading
+  const [checkins, setCheckins] = useState(null);
+  const [tab, setTab] = useState("inbox");
 
   useEffect(() => {
     let cancelled = false;
@@ -521,6 +522,10 @@ function InboxScreen({ userId, onBack }) {
     return () => { cancelled = true; };
   }, [userId]);
 
+  const received = (checkins || []).filter((g) => g.created_by !== userId);
+  const sent = (checkins || []).filter((g) => g.created_by === userId);
+  const visible = tab === "inbox" ? received : sent;
+
   return (
     <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
@@ -528,16 +533,28 @@ function InboxScreen({ userId, onBack }) {
         <button onClick={onBack} className="flex items-center gap-1 text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
           <ChevronLeft size={14} /> BACK TO HOME
         </button>
-        <h1 className="text-[22px] mb-2" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Inbox</h1>
+
+        <div className="flex items-center gap-2 mb-6">
+          <button onClick={() => setTab("inbox")} className="px-4 py-2 rounded-full text-[12px] font-bold tracking-wide"
+            style={{ background: tab === "inbox" ? "#2B2A1F" : "rgba(43,42,31,0.06)", color: tab === "inbox" ? "#EFE9DA" : "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+            INBOX {received.length > 0 ? `(${received.length})` : ""}
+          </button>
+          <button onClick={() => setTab("sent")} className="px-4 py-2 rounded-full text-[12px] font-bold tracking-wide"
+            style={{ background: tab === "sent" ? "#2B2A1F" : "rgba(43,42,31,0.06)", color: tab === "sent" ? "#EFE9DA" : "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+            SENT {sent.length > 0 ? `(${sent.length})` : ""}
+          </button>
+        </div>
 
         {checkins === null ? (
           <p className="text-[13px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading\u2026</p>
-        ) : checkins.length === 0 ? (
+        ) : visible.length === 0 ? (
           <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-            Nothing here yet. Start a check-in and send it to a group to see answers appear here as people post.
+            {tab === "inbox"
+              ? "Nothing here yet. When someone sends you a check-in and you both post, it'll show up here."
+              : "Nothing here yet. Check-ins you start and send to others will show up here."}
           </p>
         ) : (
-          checkins.map((g) => (
+          visible.map((g) => (
             <div key={g.id} className="mb-6 pb-6" style={{ borderBottom: "1px solid rgba(43,42,31,0.1)" }}>
               <p className="text-[10px] tracking-wide mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
                 {new Date(g.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
