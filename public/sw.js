@@ -1,3 +1,24 @@
+self.addEventListener("push", (event) => {
+  const data = event.data ? event.data.json() : {};
+  const title = data.title || "Rose, Bud, Thorn";
+  const options = {
+    body: data.body || "Someone posted a new check-in.",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: "window" }).then((clientList) => {
+      if (clientList.length > 0) return clientList[0].focus();
+      return clients.openWindow("/");
+    })
+  );
+});
+
 const CACHE_NAME = "rose-bud-thorn-v1";
 
 self.addEventListener("install", (event) => {
@@ -13,8 +34,6 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// network-first: always try the network so users get fresh app updates,
-// only fall back to cache if they're offline
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
