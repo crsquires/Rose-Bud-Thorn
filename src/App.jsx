@@ -123,7 +123,7 @@ function PostcardBack({ slide, index, value, onChange }) {
   );
 }
 
-function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveError }) {
+function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveError, joinedExisting }) {
   const [index, setIndex] = useState(0);
   const [dragX, setDragX] = useState(0);
   const startX = useRef(null);
@@ -143,6 +143,12 @@ function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveErr
       <span className="text-[10px] tracking-[0.35em] uppercase mb-4" style={{ color: "rgba(60,48,35,0.55)", fontFamily: "'Special Elite', monospace" }}>
         {index === 0 ? "Swipe to begin" : `Card ${index + 1} of ${INTRO_SLIDES.length}`}
       </span>
+
+      {joinedExisting && (
+        <p className="text-[12px] text-center leading-relaxed mb-4 px-4" style={{ color: "rgba(60,48,35,0.7)", fontFamily: "'Fraunces', serif", fontStyle: "italic", maxWidth: "340px" }}>
+          Fill out your rose, bud & thorn to see what they shared.
+        </p>
+      )}
 
       <div className="w-full max-w-md md:max-w-3xl flex items-center gap-4">
         <button onClick={() => go(index - 1)} disabled={index === 0} className="hidden md:flex shrink-0 items-center justify-center w-10 h-10 rounded-full disabled:opacity-20" style={{ background: "rgba(60,48,35,0.08)" }}>
@@ -197,7 +203,42 @@ function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveErr
   );
 }
 
-function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInbox, saveError }) {
+const VAPID_PUBLIC_KEY = "BHI7wXECF3F0U9KYT4BIDo3OT4n5DTgvEV0YNVPwqBCRsWUPxu8PrKoKFu2MnmBXVStPEvA7ssOZl8BGEE5FYGA";
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+async function enablePushNotifications(userId) {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    return { error: "Push notifications aren't supported on this browser." };
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    return { error: "Notifications permission was not granted." };
+  }
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+  });
+  const json = subscription.toJSON();
+  const { error } = await supabase.from("push_subscriptions").upsert(
+    {
+      user_id: userId,
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+    },
+    { onConflict: "endpoint" }
+  );
+  return { error };
+}
+
+function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInbox, saveError, onEnableNotifications, notifStatus }) {
   const cardsDone = filledCount >= 3;
   const inboxDone = waitingCount === 0 && readCount > 0;
 
@@ -277,6 +318,22 @@ function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInb
         <p className="text-center mt-8 mx-auto text-[13px] leading-relaxed" style={{ maxWidth: "280px", color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Permanent Marker', cursive" }}>
           Rose, Bud, Thorn is a simple way to stay part of your friends' everyday lives. Share something good, something you're looking forward to, and something that's been a little rough. It's part game, part check-in, and an easy way to feel closer even when life gets busy.
         </p>
+
+        {notifStatus === "idle" && (
+          <button onClick={onEnableNotifications} className="mt-6 text-[11px] underline" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+            turn on notifications
+          </button>
+        )}
+        {notifStatus === "error" && (
+          <p className="mt-6 text-[11px] text-center" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
+            Couldn't enable notifications on this device.
+          </p>
+        )}
+        {notifStatus === "enabled" && (
+          <p className="mt-6 text-[11px] text-center" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
+            Notifications on
+          </p>
+        )}
         </div>
       </div>
     </div>
@@ -349,7 +406,7 @@ function SendScreen({ userId, groupId, onDone }) {
         <div className="w-full text-center" style={{ maxWidth: "340px" }}>
           <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>{activeLink.name}</h1>
           <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
-            Share this link with anyone you want in this check-in. No typing needed — they'll join with their own name once they sign in.
+            Share this link with anyone you want in this check-in. No typing needed — they'll fill out their own rose, bud & thorn first, then see what everyone else shared.
           </p>
           <button onClick={shareLink} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide mb-3"
             style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
@@ -637,6 +694,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [joinError, setJoinError] = useState(null);
+  const [notifStatus, setNotifStatus] = useState("idle");
 
   const [pendingInvite] = useState(() => {
     const match = window.location.pathname.match(/^\/invite\/([^/]+)/);
@@ -701,6 +759,11 @@ export default function App() {
   }, [session, pendingInvite]);
 
   const filledCount = Object.values(cardEntries).filter((v) => v.trim().length > 0).length;
+
+  const handleEnableNotifications = async () => {
+    const { error } = await enablePushNotifications(session.user.id);
+    setNotifStatus(error ? "error" : "enabled");
+  };
 
   const startCheckIn = () => {
     setSaveError(null);
@@ -767,6 +830,10 @@ export default function App() {
       .update({ fill_count: (userRow?.fill_count ?? 0) + 1 })
       .eq("id", session.user.id);
 
+    supabase.functions
+      .invoke("send-push", { body: { group_id: targetGroupId, sender_id: session.user.id } })
+      .catch(() => {});
+
     setGroupId(targetGroupId);
     setSaving(false);
     setStage(joinedExisting ? "home" : "send");
@@ -816,6 +883,7 @@ export default function App() {
         onGoHome={() => setStage("home")}
         saving={saving}
         saveError={saveError}
+        joinedExisting={joinedExisting}
       />
     );
   }
@@ -832,6 +900,8 @@ export default function App() {
       onOpenCards={startCheckIn}
       onOpenInbox={() => setStage("inbox")}
       saveError={saveError}
+      onEnableNotifications={handleEnableNotifications}
+      notifStatus={notifStatus}
     />
   );
 }
