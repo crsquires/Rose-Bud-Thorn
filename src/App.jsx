@@ -141,7 +141,7 @@ function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveErr
       `}</style>
 
       <span className="text-[10px] tracking-[0.35em] uppercase mb-4" style={{ color: "rgba(60,48,35,0.55)", fontFamily: "'Special Elite', monospace" }}>
-        Swipe to begin
+        {index === 0 ? "Swipe to begin" : `Card ${index + 1} of ${INTRO_SLIDES.length}`}
       </span>
 
       <div className="w-full max-w-md md:max-w-3xl flex items-center gap-4">
@@ -174,7 +174,7 @@ function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveErr
         <div className="flex flex-col items-center">
           <button onClick={onBegin} disabled={saving} className="mt-6 flex items-center gap-2 px-5 py-2.5 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-60"
             style={{ background: "#2B2A1F", color: "#E9DCBE", fontFamily: "'Special Elite', monospace" }}>
-            {saving ? "SAVING\u2026" : (<>BEGIN YOUR FIRST CHECK-IN <ArrowRight size={13} /></>)}
+            {saving ? "SAVING\u2026" : (<>BEGIN TODAY'S CHECK-IN <ArrowRight size={13} /></>)}
           </button>
           {saveError && (
             <p className="text-[11px] mt-2" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{saveError}</p>
@@ -443,7 +443,7 @@ function InboxScreen({ userId, onBack }) {
         })
       );
 
-      if (!cancelled) setCheckins(withCards);
+      if (!cancelled) setCheckins(withCards.filter((g) => g.cards.length > 0));
     })();
 
     return () => { cancelled = true; };
@@ -618,6 +618,7 @@ export default function App() {
   const [stage, setStage] = useState("home");
   const [cardEntries, setCardEntries] = useState({ rose: "", bud: "", thorn: "" });
   const [groupId, setGroupId] = useState(null);
+  const [joinedExisting, setJoinedExisting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [joinError, setJoinError] = useState(null);
@@ -672,49 +673,61 @@ export default function App() {
       }
 
       window.history.replaceState({}, "", "/");
-      setStage("home");
+
+      if (pendingInvite.checkinGroupId) {
+        setGroupId(pendingInvite.checkinGroupId);
+        setJoinedExisting(true);
+        setCardEntries({ rose: "", bud: "", thorn: "" });
+        setStage("cards");
+      } else {
+        setStage("home");
+      }
     })();
   }, [session, pendingInvite]);
 
   const filledCount = Object.values(cardEntries).filter((v) => v.trim().length > 0).length;
 
-  const startCheckIn = async () => {
+  const startCheckIn = () => {
     setSaveError(null);
-    const { data, error } = await supabase
-      .from("groups")
-      .insert({ created_by: session.user.id })
-      .select()
-      .single();
-
-    if (error) {
-      setSaveError(error.message);
-      return;
-    }
-
-    await supabase.from("group_members").insert({
-      group_id: data.id,
-      user_id: session.user.id,
-      invite_token: data.id,
-      joined_at: new Date().toISOString(),
-    });
-
-    setGroupId(data.id);
     setCardEntries({ rose: "", bud: "", thorn: "" });
+    setGroupId(null);
+    setJoinedExisting(false);
     setStage("cards");
   };
 
   const finishCheckIn = async () => {
-    if (!groupId) {
-      setStage("home");
-      return;
-    }
     setSaving(true);
     setSaveError(null);
+
+    let targetGroupId = groupId;
+
+    if (!targetGroupId) {
+      const { data: group, error: groupErr } = await supabase
+        .from("groups")
+        .insert({ created_by: session.user.id })
+        .select()
+        .single();
+
+      if (groupErr) {
+        setSaving(false);
+        setSaveError(groupErr.message);
+        return;
+      }
+
+      await supabase.from("group_members").insert({
+        group_id: group.id,
+        user_id: session.user.id,
+        invite_token: group.id,
+        joined_at: new Date().toISOString(),
+      });
+
+      targetGroupId = group.id;
+    }
 
     const rows = Object.entries(cardEntries)
       .filter(([, value]) => value.trim().length > 0)
       .map(([type, content]) => ({
-        group_id: groupId,
+        group_id: targetGroupId,
         user_id: session.user.id,
         type,
         content,
@@ -739,8 +752,9 @@ export default function App() {
       .update({ fill_count: (userRow?.fill_count ?? 0) + 1 })
       .eq("id", session.user.id);
 
+    setGroupId(targetGroupId);
     setSaving(false);
-    setStage("send");
+    setStage(joinedExisting ? "home" : "send");
   };
 
   const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
