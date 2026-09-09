@@ -848,6 +848,8 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
   const [groups, setGroups] = useState([]);
   const [profiles, setProfiles] = useState({});
   const [picked, setPicked] = useState([]);
+  const [showAllContacts, setShowAllContacts] = useState(false);
+  const [showAllGroups, setShowAllGroups] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [savedGroup, setSavedGroup] = useState(false);
   const [sending, setSending] = useState(false);
@@ -857,8 +859,18 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
   useEffect(() => {
     (async () => {
       const [{ data: cs }, { data: gs }, { data: people }] = await Promise.all([
-        supabase.from("contacts").select("id, name, phone, linked_user_id").eq("owner_id", userId).order("name"),
-        supabase.from("contact_groups").select("id, name, contact_group_members(contact_id)").eq("owner_id", userId).order("name"),
+        supabase
+          .from("contacts")
+          .select("id, name, phone, linked_user_id, last_sent_at, created_at")
+          .eq("owner_id", userId)
+          .order("last_sent_at", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("contact_groups")
+          .select("id, name, last_sent_at, created_at, contact_group_members(contact_id)")
+          .eq("owner_id", userId)
+          .order("last_sent_at", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false }),
         supabase.rpc("profiles_for_my_checkins"),
       ]);
       const byId = {};
@@ -938,6 +950,16 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
         smsOpened = true;
       }
 
+      // Remember who this went to so the shortlist stays the useful five.
+      const now = new Date().toISOString();
+      const usedGroupIds = groups.filter(groupIsOn).map((g) => g.id);
+      await Promise.all([
+        supabase.from("contacts").update({ last_sent_at: now }).in("id", picked),
+        usedGroupIds.length > 0
+          ? supabase.from("contact_groups").update({ last_sent_at: now }).in("id", usedGroupIds)
+          : Promise.resolve(),
+      ]);
+
       setResult({
         pushed: linked.length,
         texted: withPhones.length,
@@ -988,6 +1010,16 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
   };
 
   const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
+
+  // Five most recent, plus anyone currently ticked so a selection never
+  // disappears when the list is collapsed.
+  const visibleContacts = (() => {
+    if (!contacts) return [];
+    if (showAllContacts) return contacts;
+    const top = contacts.slice(0, 5);
+    const extras = contacts.filter((c) => picked.includes(c.id) && !top.includes(c));
+    return [...top, ...extras];
+  })();
 
   // Nobody saved yet: the link is the only route, so it becomes the main action.
   const isEmpty = contacts !== null && contacts.length === 0 && groups.length === 0;
@@ -1083,7 +1115,7 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
         {groups.length > 0 && (
           <>
             <p className="text-[10px] tracking-[0.2em] mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>GROUPS</p>
-            {groups.map((g) => {
+            {(showAllGroups ? groups : groups.slice(0, 5)).map((g) => {
               const on = groupIsOn(g);
               return (
                 <button key={g.id} onClick={() => toggleGroup(g)}
@@ -1096,6 +1128,12 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
                 </button>
               );
             })}
+            {groups.length > 5 && (
+              <button onClick={() => setShowAllGroups((v) => !v)} className="text-[11px] underline mt-1"
+                style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
+                {showAllGroups ? "show fewer" : `show all ${groups.length} groups`}
+              </button>
+            )}
             <div className="mb-6" />
           </>
         )}
@@ -1111,7 +1149,7 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
             Nobody's on your list yet. Send a link to whoever you want to hear from — once they open it, they're saved here and every check-in after this one is a single tap.
           </p>
         ) : (
-          contacts.map((c) => {
+          visibleContacts.map((c) => {
             const on = picked.includes(c.id);
             return (
               <button key={c.id} onClick={() => toggleContact(c.id)}
@@ -1129,6 +1167,13 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
               </button>
             );
           })
+        )}
+
+        {contacts && contacts.length > 5 && (
+          <button onClick={() => setShowAllContacts((v) => !v)} className="text-[11px] underline mt-1"
+            style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
+            {showAllContacts ? "show fewer" : `show all ${contacts.length} people`}
+          </button>
         )}
 
         {isEmpty ? (
@@ -1481,10 +1526,10 @@ function CommentThread({ card, groupId, userId, profiles }) {
   );
 }
 
-function InboxScreen({ userId, profile, onBack, onProfile }) {
+function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTab }) {
   const [checkins, setCheckins] = useState(null);
   const [profiles, setProfiles] = useState({});
-  const [tab, setTab] = useState("inbox");
+  const [tab, setTab] = useState(initialTab || "inbox");
 
   useEffect(() => {
     let cancelled = false;
@@ -1576,6 +1621,14 @@ function InboxScreen({ userId, profile, onBack, onProfile }) {
                 {new Date(g.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 {g.title ? ` · ${g.title.toUpperCase()}` : ""}
               </p>
+
+              {tab === "sent" && (
+                <button onClick={() => onSendMore(g)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full mb-4"
+                  style={{ background: "rgba(43,42,31,0.06)", color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace", fontSize: "10px" }}>
+                  <ArrowRight size={12} /> SEND TO SOMEONE ELSE
+                </button>
+              )}
 
               {byAuthor(g.cards).map((author) => (
                 <div key={author.userId} className="mb-5">
@@ -1753,6 +1806,7 @@ export default function App() {
   const [showPrimer, setShowPrimer] = useState(false);
   const [profile, setProfile] = useState(undefined);
   const [checkInTitle, setCheckInTitle] = useState(null);
+  const [inboxTab, setInboxTab] = useState("inbox");
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState(null);
 
@@ -1924,7 +1978,18 @@ export default function App() {
     setGroupId(null);
     setJoinedExisting(false);
     setCheckInTitle(null);
+    setSendOrigin("flow");
     setStage("kind");
+  };
+
+  const [sendOrigin, setSendOrigin] = useState("flow");
+
+  // Re-open the send screen for a check-in you already posted.
+  const sendMore = (group) => {
+    setGroupId(group.id);
+    setCheckInTitle(group.title || null);
+    setSendOrigin("inbox");
+    setStage("send");
   };
 
   const beginWithKind = (title) => {
@@ -2054,8 +2119,10 @@ export default function App() {
       <InboxScreen
         userId={session.user.id}
         profile={profile}
+        initialTab={inboxTab}
         onBack={() => setStage("home")}
         onProfile={() => setStage("profile")}
+        onSendMore={sendMore}
       />
     );
   }
@@ -2113,7 +2180,10 @@ export default function App() {
         groupId={groupId}
         profile={profile}
         title={checkInTitle}
-        onDone={() => setStage("home")}
+        onDone={() => {
+          if (sendOrigin === "inbox") { setInboxTab("sent"); setStage("inbox"); }
+          else setStage("home");
+        }}
         onHome={() => setStage("home")}
         onProfile={() => setStage("profile")}
       />
