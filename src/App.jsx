@@ -377,11 +377,8 @@ function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, 
             ["bud", "something you're looking forward to"],
             ["thorn", "something that's been a little rough"],
           ].map(([type, meaning]) => (
-            <p key={type} className="text-[13px] leading-relaxed mb-1.5" style={{ color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Fraunces', serif" }}>
-              <span style={{ color: TYPE_INK[type], fontFamily: "'Special Elite', monospace", fontSize: "11px", letterSpacing: "0.1em" }}>
-                {TYPE_LABELS[type]}
-              </span>{" "}
-              — {meaning}
+            <p key={type} className="text-[13px] leading-relaxed mb-2" style={{ color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Permanent Marker', cursive" }}>
+              <span style={{ color: TYPE_INK[type] }}>{TYPE_LABELS[type]}</span> — {meaning}
             </p>
           ))}
         </div>
@@ -539,7 +536,6 @@ function NameStep({ initialName, onSave, saving, error }) {
 
 function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifStatus, onEnableNotifications }) {
   const [name, setName] = useState(profile?.display_name || "");
-  const [checkInTitle, setCheckInTitle] = useState(null);
   const [savingName, setSavingName] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
@@ -1586,6 +1582,7 @@ export default function App() {
   );
   const [showPrimer, setShowPrimer] = useState(false);
   const [profile, setProfile] = useState(undefined);
+  const [checkInTitle, setCheckInTitle] = useState(null);
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState(null);
 
