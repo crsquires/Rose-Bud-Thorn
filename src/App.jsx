@@ -993,43 +993,82 @@ function TopBar({ onHome, onProfile, current, avatarUrl, name }) {
   );
 }
 
-function InvitePreview({ invite, onContinue }) {
-  const [state, setState] = useState({ status: "loading", cards: [], name: null, avatar: null });
+// Signed-out invite landing. Shows WHO is waiting on you, never what they
+// wrote -- card content stays behind the account.
+function InviteWelcome({ invite }) {
+  const [sender, setSender] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!invite.checkinGroupId) { setState({ status: "empty" }); return; }
-
-      const { data, error } = await supabase.rpc("preview_checkin", {
+      const { data } = await supabase.rpc("preview_invite_sender", {
         p_invite_token: invite.circleToken,
-        p_group_id: invite.checkinGroupId,
       });
-
-      if (cancelled) return;
-
-      if (error || !data || data.length === 0) {
-        setState({ status: "empty" });
-        return;
+      if (!cancelled && data && data.length > 0) {
+        setSender({ name: data[0].sender_name, avatar: data[0].sender_avatar });
       }
-
-      setState({
-        status: "ready",
-        name: data[0].author_name,
-        avatar: data[0].author_avatar,
-        cards: data.map((r) => ({ type: r.card_type, content: r.card_content })),
-      });
     })();
     return () => { cancelled = true; };
   }, [invite]);
 
-  // No live check-in behind the link -- send them straight to sign-in
-  // rather than showing an empty page.
-  useEffect(() => {
-    if (state.status === "empty") onContinue();
-  }, [state.status]);
+  return (
+    <div className="w-full flex flex-col items-center text-center px-6 pt-12">
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
+      <Avatar url={sender?.avatar} name={sender?.name} size={64} />
+      <p className="text-[17px] mt-4 mb-2" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
+        {sender ? `${sender.name} shared their day with you` : "Someone shared their day with you"}
+      </p>
+      <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif", maxWidth: "290px" }}>
+        Sign in and it's the first thing you'll see.
+      </p>
+    </div>
+  );
+}
 
-  if (state.status !== "ready") {
+// Straight after joining: read what they sent, then write yours.
+function ReceivedCheckIn({ groupId, onContinue }) {
+  const [state, setState] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: group } = await supabase
+        .from("groups")
+        .select("id, created_by")
+        .eq("id", groupId)
+        .maybeSingle();
+
+      if (!group) { if (!cancelled) setState({ cards: [] }); return; }
+
+      const [{ data: cards }, { data: people }] = await Promise.all([
+        supabase
+          .from("cards")
+          .select("id, type, content, created_at")
+          .eq("group_id", groupId)
+          .eq("user_id", group.created_by)
+          .order("created_at", { ascending: true }),
+        supabase.rpc("profiles_for_my_checkins"),
+      ]);
+
+      if (cancelled) return;
+
+      const author = (people || []).find((p) => p.id === group.created_by);
+      setState({
+        cards: cards || [],
+        name: (author && author.display_name) || "Your friend",
+        avatar: author && author.avatar_url,
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [groupId]);
+
+  if (!state) {
+    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
+  }
+
+  // Nothing to read (they sent an empty check-in) -- skip straight to writing.
+  if (state.cards.length === 0) {
+    onContinue();
     return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
   }
 
@@ -1041,12 +1080,12 @@ function InvitePreview({ invite, onContinue }) {
         <div className="flex flex-col items-center text-center mb-9">
           <Avatar url={state.avatar} name={state.name} size={64} />
           <p className="text-[17px] mt-4" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
-            {state.name} shared their day with you
+            {state.name}'s day
           </p>
         </div>
 
-        {state.cards.map((c, i) => (
-          <div key={i} className="w-full rounded-2xl px-5 py-4 mb-3"
+        {state.cards.map((c) => (
+          <div key={c.id} className="w-full rounded-2xl px-5 py-4 mb-3"
             style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.12)" }}>
             <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
               {TYPE_LABELS[c.type]}
@@ -1066,6 +1105,9 @@ function InvitePreview({ invite, onContinue }) {
             style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
             SHARE MINE BACK
           </button>
+          <p className="text-[11px] mt-4" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
+            you can reply to any of these from your inbox
+          </p>
         </div>
       </div>
     </div>
@@ -1095,14 +1137,19 @@ function CommentThread({ card, groupId, userId, profiles }) {
     if (!text) return;
     setPosting(true);
     setError(null);
-    const { error: err } = await supabase.from("comments").insert({
-      card_id: card.id,
-      group_id: groupId,
-      user_id: userId,
-      content: text,
-    });
+    const { data: inserted, error: err } = await supabase
+      .from("comments")
+      .insert({ card_id: card.id, group_id: groupId, user_id: userId, content: text })
+      .select("id")
+      .single();
     setPosting(false);
     if (err) { setError(err.message); return; }
+
+    // Best effort -- a failed push should never look like a failed reply.
+    supabase.functions
+      .invoke("notify-comment", { body: { comment_id: inserted.id } })
+      .catch(() => {});
+
     setDraft("");
     load();
   };
@@ -1291,7 +1338,7 @@ function InboxScreen({ userId, profile, onBack, onProfile }) {
   );
 }
 
-function AuthScreen() {
+function AuthScreen({ invite }) {
   const [showEmail, setShowEmail] = useState(false);
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -1325,9 +1372,15 @@ function AuthScreen() {
         <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
       </div>
 
-      <p className="text-[15px] mb-8" style={{ color: hexToRgba(ENTRY_INK, 0.7), fontFamily: "'Permanent Marker', cursive" }}>
-        Connect with a friend today
-      </p>
+      {invite ? (
+        <div className="mb-8 -mt-2">
+          <InviteWelcome invite={invite} />
+        </div>
+      ) : (
+        <p className="text-[15px] mb-8" style={{ color: hexToRgba(ENTRY_INK, 0.7), fontFamily: "'Permanent Marker', cursive" }}>
+          Connect with a friend today
+        </p>
+      )}
 
       {sent ? (
         <div className="w-full text-center" style={{ maxWidth: "320px" }}>
@@ -1427,8 +1480,6 @@ export default function App() {
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState(null);
 
-  const [previewSeen, setPreviewSeen] = useState(false);
-
   const [pendingInvite] = useState(() => {
     const match = window.location.pathname.match(/^\/invite\/([^/]+)/);
     if (!match) return null;
@@ -1502,7 +1553,7 @@ export default function App() {
         setGroupId(pendingInvite.checkinGroupId);
         setJoinedExisting(true);
         setCardEntries({ rose: "", bud: "", thorn: "" });
-        setStage("cards");
+        setStage("received");
       } else {
         setStage("home");
       }
@@ -1675,10 +1726,7 @@ export default function App() {
   }
 
   if (!session) {
-    if (pendingInvite && !previewSeen) {
-      return <InvitePreview invite={pendingInvite} onContinue={() => setPreviewSeen(true)} />;
-    }
-    return <AuthScreen />;
+    return <AuthScreen invite={pendingInvite} />;
   }
 
   if (stage === "joining") {
@@ -1734,6 +1782,10 @@ export default function App() {
         onEnableNotifications={handleEnableNotifications}
       />
     );
+  }
+
+  if (stage === "received") {
+    return <ReceivedCheckIn groupId={groupId} onContinue={() => setStage("cards")} />;
   }
 
   if (stage === "cards") {
