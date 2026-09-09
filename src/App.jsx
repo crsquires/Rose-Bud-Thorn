@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Trash2, User, Bell, Plus, Check, Users } from "lucide-react";
 import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
 import { STAMP_IMG, WORD_IMG } from "./assets";
 
@@ -93,9 +93,8 @@ function PostcardBack({ slide, index, value, onChange }) {
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onMouseDown={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-          placeholder={`Type your ${word.toLowerCase()} here\u2026`}
+          onDragStart={(e) => e.preventDefault()}
+          placeholder={`Type your ${word.toLowerCase()} here…`}
           className="rbt-entry w-full h-full resize-none bg-transparent outline-none border-none"
           style={{
             "--ph-color": ENTRY_INK,
@@ -126,12 +125,52 @@ function PostcardBack({ slide, index, value, onChange }) {
 function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveError, joinedExisting }) {
   const [index, setIndex] = useState(0);
   const [dragX, setDragX] = useState(0);
-  const startX = useRef(null);
+  const start = useRef(null);
+  const axis = useRef(null);
   const dragging = useRef(false);
   const go = (i) => setIndex(Math.max(0, Math.min(INTRO_SLIDES.length - 1, i)));
-  const onDown = (e) => { startX.current = (e.touches ? e.touches[0].clientX : e.clientX); dragging.current = true; };
-  const onMove = (e) => { if (!dragging.current) return; const x = (e.touches ? e.touches[0].clientX : e.clientX); setDragX(x - startX.current); };
-  const onUp = () => { if (!dragging.current) return; dragging.current = false; if (dragX < -60) go(index + 1); else if (dragX > 60) go(index - 1); setDragX(0); };
+
+  const point = (e) => (e.touches && e.touches[0] ? e.touches[0] : e);
+
+  const onDown = (e) => {
+    const p = point(e);
+    start.current = { x: p.clientX, y: p.clientY };
+    axis.current = null;
+    dragging.current = true;
+  };
+
+  const onMove = (e) => {
+    if (!dragging.current || !start.current) return;
+    const p = point(e);
+    const dx = p.clientX - start.current.x;
+    const dy = p.clientY - start.current.y;
+
+    // Wait until the gesture is clearly horizontal or vertical before
+    // committing. A tap (tiny movement) never commits, so tapping the
+    // writing area still focuses it and opens the keyboard.
+    if (axis.current === null) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      axis.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      if (axis.current === "x" && document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+      }
+    }
+
+    if (axis.current !== "x") return;
+    setDragX(dx);
+  };
+
+  const onUp = () => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    if (axis.current === "x") {
+      if (dragX < -60) go(index + 1);
+      else if (dragX > 60) go(index - 1);
+    }
+    axis.current = null;
+    start.current = null;
+    setDragX(0);
+  };
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center px-4" style={{ background: "#E8DFCB" }}>
@@ -156,7 +195,7 @@ function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveErr
         </button>
 
         <div className="w-full max-w-md md:max-w-xl mx-auto relative overflow-hidden rounded-[3px] touch-pan-y" style={{ aspectRatio: "3 / 2" }} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp} onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}>
-          <div className="flex h-full" style={{ width: `${INTRO_SLIDES.length * 100}%`, transform: `translateX(calc(${-index * (100 / INTRO_SLIDES.length)}% + ${dragX}px))`, transition: dragging.current ? "none" : "transform 320ms cubic-bezier(.2,.8,.2,1)" }}>
+          <div className="flex h-full" style={{ width: `${INTRO_SLIDES.length * 100}%`, transform: `translateX(calc(${-index * (100 / INTRO_SLIDES.length)}% + ${dragX}px))`, transition: axis.current === "x" ? "none" : "transform 320ms cubic-bezier(.2,.8,.2,1)" }}>
             {INTRO_SLIDES.map((slide, i) => (
               <div key={slide.key} className="h-full px-1" style={{ width: `${100 / INTRO_SLIDES.length}%` }}>
                 <PostcardBack slide={slide} index={i} value={entries[slide.key]} onChange={(v) => setEntries((s) => ({ ...s, [slide.key]: v }))} />
@@ -180,7 +219,7 @@ function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveErr
         <div className="flex flex-col items-center">
           <button onClick={onBegin} disabled={saving} className="mt-6 flex items-center gap-2 px-5 py-2.5 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-60"
             style={{ background: "#2B2A1F", color: "#E9DCBE", fontFamily: "'Special Elite', monospace" }}>
-            {saving ? "SAVING\u2026" : (<>BEGIN TODAY'S CHECK-IN <ArrowRight size={13} /></>)}
+            {saving ? "SAVING…" : (<>BEGIN TODAY'S CHECK-IN <ArrowRight size={13} /></>)}
           </button>
           {saveError && (
             <p className="text-[11px] mt-2" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{saveError}</p>
@@ -238,7 +277,7 @@ async function enablePushNotifications(userId) {
   return { error };
 }
 
-function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInbox, saveError, onEnableNotifications, notifStatus }) {
+function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInbox, onOpenProfile, saveError }) {
   const cardsDone = filledCount >= 3;
   const inboxDone = waitingCount === 0 && readCount > 0;
 
@@ -248,8 +287,11 @@ function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInb
 
       <div className="w-full flex flex-col items-center px-6" style={{ maxWidth: "480px" }}>
         <div className="w-full flex items-center justify-between mt-6">
-          <button onClick={() => signOut()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
-            <LogOut size={13} color="rgba(43,42,31,0.5)" />
+          <button onClick={onOpenProfile} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
+            <User size={14} color="rgba(43,42,31,0.55)" />
+            <span className="text-[11px] tracking-wide" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+              PROFILE
+            </span>
           </button>
           <button onClick={onOpenInbox} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
             {inboxDone && <CheckCircle2 size={13} color="#4B5E33" />}
@@ -319,162 +361,498 @@ function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInb
           Rose, Bud, Thorn is a simple way to stay part of your friends' everyday lives. Share something good, something you're looking forward to, and something that's been a little rough. It's part game, part check-in, and an easy way to feel closer even when life gets busy.
         </p>
 
-        {notifStatus === "idle" && (
-          <button onClick={onEnableNotifications} className="mt-6 text-[11px] underline" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-            turn on notifications
-          </button>
-        )}
-        {notifStatus === "error" && (
-          <p className="mt-6 text-[11px] text-center" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
-            Couldn't enable notifications on this device.
-          </p>
-        )}
-        {notifStatus === "enabled" && (
-          <p className="mt-6 text-[11px] text-center" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
-            Notifications on
-          </p>
-        )}
         </div>
       </div>
     </div>
   );
 }
 
-function SendScreen({ userId, groupId, onDone }) {
-  const [circles, setCircles] = useState(null);
-  const [mode, setMode] = useState("list");
-  const [newName, setNewName] = useState("");
-  const [creating, setCreating] = useState(false);
+const NOTIF_ASKED_KEY = "rbt_notif_asked_v1";
+
+function NotificationPrimer({ onEnable, onSkip, status }) {
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
+
+      <div className="flex items-center justify-center gap-1 mb-6 w-full mx-auto" style={{ maxWidth: "280px" }}>
+        <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
+        <img src={WORD_IMG.bud} alt="Bud" style={{ width: "30%", height: "auto", transform: "translateY(14px) rotate(3deg)" }} />
+        <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
+      </div>
+
+      <Bell size={22} color={ENTRY_INK} style={{ marginBottom: "14px", opacity: 0.8 }} />
+
+      <p className="text-[18px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.8), fontFamily: "'Permanent Marker', cursive" }}>
+        Know when a friend checks in
+      </p>
+
+      <p className="text-[13px] leading-relaxed mb-8" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif", maxWidth: "290px" }}>
+        We'll nudge you when someone shares their rose, bud &amp; thorn with you — and give you a gentle reminder if it's been a while. Nothing else.
+      </p>
+
+      <div className="w-full" style={{ maxWidth: "300px" }}>
+        <button onClick={onEnable} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+          TURN ON NOTIFICATIONS
+        </button>
+        <button onClick={onSkip} className="w-full mt-4 text-[11px] underline"
+          style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+          not now
+        </button>
+      </div>
+
+      {status === "error" && (
+        <p className="text-[12px] mt-5" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif", maxWidth: "290px" }}>
+          Couldn't turn them on here. On iPhone, add Rose, Bud, Thorn to your home screen first — Safari only allows notifications for installed apps.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ProfileScreen({ userId, email, onBack, notifStatus, onEnableNotifications }) {
+  const [contacts, setContacts] = useState(null);
+  const [groups, setGroups] = useState(null);
   const [error, setError] = useState(null);
-  const [activeLink, setActiveLink] = useState(null);
 
-  useEffect(() => {
-    supabase
-      .from("circles")
-      .select("id, name, invite_token, circle_members(id)")
-      .eq("owner_id", userId)
-      .order("created_at", { ascending: false })
-      .then(({ data }) => setCircles(data || []));
-  }, [userId]);
+  const [addingContact, setAddingContact] = useState(false);
+  const [cName, setCName] = useState("");
+  const [cPhone, setCPhone] = useState("");
 
-  const buildLink = (circleToken) => `${window.location.origin}/invite/${circleToken}?checkin=${groupId}`;
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [gName, setGName] = useState("");
+  const [gPicked, setGPicked] = useState([]);
 
-  const openCircle = (circle) => {
-    setActiveLink({ name: circle.name, url: buildLink(circle.invite_token) });
+  const load = async () => {
+    const [{ data: cs }, { data: gs }] = await Promise.all([
+      supabase.from("contacts").select("id, name, phone, linked_user_id").eq("owner_id", userId).order("name"),
+      supabase.from("contact_groups").select("id, name, contact_group_members(contact_id)").eq("owner_id", userId).order("name"),
+    ]);
+    setContacts(cs || []);
+    setGroups(gs || []);
   };
 
-  const deleteCircle = async (circle) => {
-    if (!window.confirm(`Remove "${circle.name}"? This can't be undone.`)) return;
-    const { error } = await supabase.from("circles").delete().eq("id", circle.id);
-    if (error) {
-      setError(error.message);
-      return;
-    }
-    setCircles((prev) => prev.filter((c) => c.id !== circle.id));
-  };
+  useEffect(() => { load(); }, [userId]);
 
-  const handleCreate = async () => {
-    setCreating(true);
+  const saveContact = async () => {
+    if (!cName.trim()) return;
     setError(null);
-    const { data: circle, error: circleErr } = await supabase
-      .from("circles")
-      .insert({ owner_id: userId, name: newName.trim() || "New group" })
+    const { error: err } = await supabase.from("contacts").insert({
+      owner_id: userId,
+      name: cName.trim(),
+      phone: cPhone.trim() || null,
+    });
+    if (err) { setError(err.message); return; }
+    setCName(""); setCPhone(""); setAddingContact(false);
+    load();
+  };
+
+  const removeContact = async (c) => {
+    if (!window.confirm(`Remove ${c.name}?`)) return;
+    await supabase.from("contacts").delete().eq("id", c.id);
+    load();
+  };
+
+  const saveGroup = async () => {
+    if (!gName.trim() || gPicked.length === 0) return;
+    setError(null);
+    const { data: g, error: err } = await supabase
+      .from("contact_groups")
+      .insert({ owner_id: userId, name: gName.trim() })
       .select()
       .single();
-    setCreating(false);
-    if (circleErr) {
-      setError(circleErr.message);
-      return;
-    }
-    setActiveLink({ name: circle.name, url: buildLink(circle.invite_token) });
+    if (err) { setError(err.message); return; }
+
+    const { error: memberErr } = await supabase.from("contact_group_members").insert(
+      gPicked.map((contactId) => ({ contact_group_id: g.id, contact_id: contactId }))
+    );
+    if (memberErr) { setError(memberErr.message); return; }
+
+    setGName(""); setGPicked([]); setAddingGroup(false);
+    load();
   };
 
-  const shareLink = async () => {
-    const msg = `How was your day? I want to hear about it \u2014 join me on Rose, Bud, Thorn: ${activeLink.url}`;
-    if (navigator.share) {
-      try { await navigator.share({ text: msg }); } catch {}
-    } else {
-      await navigator.clipboard.writeText(msg);
-      alert("Link copied \u2014 paste it anywhere to send.");
-    }
+  const removeGroup = async (g) => {
+    if (!window.confirm(`Remove "${g.name}"?`)) return;
+    await supabase.from("contact_groups").delete().eq("id", g.id);
+    load();
   };
 
-  if (activeLink) {
-    return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center px-6" style={{ background: "#EFE9DA" }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
-        <div className="w-full text-center" style={{ maxWidth: "340px" }}>
-          <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>{activeLink.name}</h1>
-          <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
-            Share this link with anyone you want in this check-in. No typing needed — they'll fill out their own rose, bud & thorn first, then see what everyone else shared.
-          </p>
-          <button onClick={shareLink} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide mb-3"
-            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-            SHARE LINK
-          </button>
-          <button
-            onClick={() => { navigator.clipboard.writeText(activeLink.url); alert("Copied!"); }}
-            className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
-            style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
-          >
-            COPY LINK
-          </button>
-          <button onClick={onDone} className="w-full mt-6 text-[12px] underline" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>Done</button>
+  const togglePick = (id) =>
+    setGPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
+  const heading = { color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" };
+
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
+      <div className="w-full" style={{ maxWidth: "400px" }}>
+        <button onClick={onBack} className="flex items-center gap-1 text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+          <ChevronLeft size={14} /> BACK TO HOME
+        </button>
+
+        <h1 className="text-[22px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Profile</h1>
+        <p className="text-[12px] mb-8" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>{email}</p>
+
+        {/* ---------- notifications ---------- */}
+        <p className="text-[10px] tracking-[0.2em] mb-3" style={heading}>NOTIFICATIONS</p>
+        <div className="w-full flex items-center justify-between px-4 py-3 rounded-2xl mb-2" style={pill}>
+          <div className="flex items-center gap-2">
+            <Bell size={14} color="rgba(43,42,31,0.55)" />
+            <span className="text-[13px]">Check-in alerts</span>
+          </div>
+          {notifStatus === "enabled" ? (
+            <span className="flex items-center gap-1 text-[11px]" style={{ color: "#4B5E33" }}>
+              <CheckCircle2 size={13} /> ON
+            </span>
+          ) : (
+            <button onClick={onEnableNotifications} className="text-[11px] px-3 py-1 rounded-full"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+              TURN ON
+            </button>
+          )}
         </div>
+        {notifStatus === "error" && (
+          <p className="text-[11px] leading-relaxed mb-6" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
+            Couldn't turn them on here. On iPhone, add the app to your home screen first, then try again.
+          </p>
+        )}
+        <div className="mb-8" />
+
+        {/* ---------- contacts ---------- */}
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[10px] tracking-[0.2em]" style={heading}>CONTACTS</p>
+          <button onClick={() => setAddingContact((v) => !v)} className="flex items-center gap-1 text-[11px]" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+            <Plus size={13} /> ADD
+          </button>
+        </div>
+
+        {addingContact && (
+          <div className="mb-4">
+            <input value={cName} onChange={(e) => setCName(e.target.value)} placeholder="Name"
+              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2" style={pill} />
+            <input value={cPhone} onChange={(e) => setCPhone(e.target.value)} placeholder="Phone number" type="tel"
+              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2" style={pill} />
+            <button onClick={saveContact} className="w-full px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+              SAVE CONTACT
+            </button>
+          </div>
+        )}
+
+        {contacts === null ? (
+          <p className="text-[12px] mb-8" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
+        ) : contacts.length === 0 ? (
+          <p className="text-[12px] mb-8 leading-relaxed" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>
+            No contacts yet. Add someone and you can send them a check-in in one tap.
+          </p>
+        ) : (
+          <div className="mb-8">
+            {contacts.map((c) => (
+              <div key={c.id} className="w-full flex items-center gap-2 mb-2">
+                <div className="flex-1 flex items-center justify-between px-4 py-3 rounded-2xl" style={pill}>
+                  <span className="text-[13px]">{c.name}</span>
+                  <span className="text-[10px]" style={{ color: c.linked_user_id ? "#4B5E33" : "rgba(43,42,31,0.4)" }}>
+                    {c.linked_user_id ? "ON THE APP" : (c.phone || "no number")}
+                  </span>
+                </div>
+                <button onClick={() => removeContact(c)} className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(140,47,69,0.08)" }}>
+                  <Trash2 size={14} color="#8C2F45" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ---------- groups ---------- */}
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[10px] tracking-[0.2em]" style={heading}>GROUPS</p>
+          <button onClick={() => setAddingGroup((v) => !v)} disabled={!contacts || contacts.length === 0}
+            className="flex items-center gap-1 text-[11px] disabled:opacity-30" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+            <Plus size={13} /> NEW
+          </button>
+        </div>
+
+        {addingGroup && (
+          <div className="mb-4">
+            <input value={gName} onChange={(e) => setGName(e.target.value)} placeholder='Group name — e.g. "College Friends"'
+              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-3" style={pill} />
+            <p className="text-[11px] mb-2" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Who's in it?</p>
+            {(contacts || []).map((c) => {
+              const on = gPicked.includes(c.id);
+              return (
+                <button key={c.id} onClick={() => togglePick(c.id)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl mb-2"
+                  style={{ ...pill, background: on ? "#2B2A1F" : "#fff", color: on ? "#EFE9DA" : "#2B2A1F" }}>
+                  <span className="text-[13px]">{c.name}</span>
+                  {on && <Check size={14} />}
+                </button>
+              );
+            })}
+            <button onClick={saveGroup} disabled={!gName.trim() || gPicked.length === 0}
+              className="w-full mt-2 px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+              SAVE GROUP
+            </button>
+          </div>
+        )}
+
+        {groups && groups.length > 0 && (
+          <div className="mb-8">
+            {groups.map((g) => (
+              <div key={g.id} className="w-full flex items-center gap-2 mb-2">
+                <div className="flex-1 flex items-center justify-between px-4 py-3 rounded-2xl" style={pill}>
+                  <span className="text-[13px]">{g.name}</span>
+                  <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.4)" }}>
+                    {g.contact_group_members?.length || 0} people
+                  </span>
+                </div>
+                <button onClick={() => removeGroup(g)} className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(140,47,69,0.08)" }}>
+                  <Trash2 size={14} color="#8C2F45" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && <p className="text-[12px] mb-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
+
+        <button onClick={() => signOut()} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-full text-[12px] mt-4"
+          style={{ background: "rgba(43,42,31,0.06)", color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+          <LogOut size={13} /> SIGN OUT
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Builds a single SMS deep link addressed to everyone who isn't on the app yet.
+// iOS and Android disagree on the separator before `body`, hence the sniff.
+function buildSmsHref(numbers, body) {
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const list = numbers.map((n) => n.replace(/[^\d+]/g, "")).join(",");
+  const sep = isIOS ? "&" : "?";
+  return `sms:${list}${sep}body=${encodeURIComponent(body)}`;
+}
+
+function SendScreen({ userId, groupId, onDone }) {
+  const [contacts, setContacts] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [picked, setPicked] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const [{ data: cs }, { data: gs }] = await Promise.all([
+        supabase.from("contacts").select("id, name, phone, linked_user_id").eq("owner_id", userId).order("name"),
+        supabase.from("contact_groups").select("id, name, contact_group_members(contact_id)").eq("owner_id", userId).order("name"),
+      ]);
+      setContacts(cs || []);
+      setGroups(gs || []);
+    })();
+  }, [userId]);
+
+  const toggleContact = (id) =>
+    setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const toggleGroup = (g) => {
+    const ids = (g.contact_group_members || []).map((m) => m.contact_id);
+    const allOn = ids.length > 0 && ids.every((id) => picked.includes(id));
+    setPicked((prev) => (allOn ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]));
+  };
+
+  const groupIsOn = (g) => {
+    const ids = (g.contact_group_members || []).map((m) => m.contact_id);
+    return ids.length > 0 && ids.every((id) => picked.includes(id));
+  };
+
+  // One circle per send. Tagging it with contact_id (when it is a
+  // one-to-one send) is what lets us auto-link that contact to their
+  // account the moment they accept, so next time they get push instead.
+  const makeCircle = async (name, contactId) => {
+    const { data, error: err } = await supabase
+      .from("circles")
+      .insert({ owner_id: userId, name, contact_id: contactId || null })
+      .select()
+      .single();
+    if (err) throw new Error(err.message);
+    return data;
+  };
+
+  const send = async () => {
+    setSending(true);
+    setError(null);
+
+    try {
+      const chosen = (contacts || []).filter((c) => picked.includes(c.id));
+      const linked = chosen.filter((c) => c.linked_user_id);
+      const unlinked = chosen.filter((c) => !c.linked_user_id);
+
+      // 1. People already on the app: drop them straight into this
+      //    check-in and push them. No text, no tapping.
+      if (linked.length > 0) {
+        const { error: memberErr } = await supabase.from("group_members").insert(
+          linked.map((c) => ({
+            group_id: groupId,
+            user_id: c.linked_user_id,
+            invite_token: crypto.randomUUID(),
+            joined_at: null,
+          }))
+        );
+        if (memberErr) throw new Error(memberErr.message);
+
+        await supabase.functions
+          .invoke("send-push", { body: { group_id: groupId, sender_id: userId } })
+          .catch(() => {});
+      }
+
+      // 2. Everyone else: one pre-filled text with the invite link.
+      let smsOpened = false;
+      const withPhones = unlinked.filter((c) => c.phone);
+
+      if (withPhones.length > 0) {
+        const circle = await makeCircle(
+          withPhones.length === 1 ? withPhones[0].name : "Check-in",
+          withPhones.length === 1 ? withPhones[0].id : null
+        );
+        const url = `${window.location.origin}/invite/${circle.invite_token}?checkin=${groupId}`;
+        const body = `How was your day? I want to hear about it — join me on Rose, Bud, Thorn: ${url}`;
+        window.location.href = buildSmsHref(withPhones.map((c) => c.phone), body);
+        smsOpened = true;
+      }
+
+      setResult({
+        pushed: linked.length,
+        texted: withPhones.length,
+        skipped: unlinked.length - withPhones.length,
+        smsOpened,
+      });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Fallback for anyone not saved as a contact yet.
+  const shareGenericLink = async () => {
+    setError(null);
+    try {
+      const circle = await makeCircle("Check-in", null);
+      const url = `${window.location.origin}/invite/${circle.invite_token}?checkin=${groupId}`;
+      const msg = `How was your day? I want to hear about it — join me on Rose, Bud, Thorn: ${url}`;
+      if (navigator.share) {
+        try { await navigator.share({ text: msg }); } catch {}
+      } else {
+        await navigator.clipboard.writeText(msg);
+        alert("Link copied — paste it anywhere to send.");
+      }
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
+
+  if (result) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
+        <CheckCircle2 size={26} color="#4B5E33" style={{ marginBottom: "14px" }} />
+        <h1 className="text-[20px] mb-3" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Sent</h1>
+        <div className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif", maxWidth: "300px" }}>
+          {result.pushed > 0 && (
+            <p className="mb-2">
+              {result.pushed} {result.pushed === 1 ? "person" : "people"} got a notification straight away.
+            </p>
+          )}
+          {result.texted > 0 && (
+            <p className="mb-2">
+              {result.texted} {result.texted === 1 ? "invite is" : "invites are"} waiting in your Messages app — hit send there to finish.
+            </p>
+          )}
+          {result.skipped > 0 && (
+            <p className="mb-2" style={{ color: "#8C2F45" }}>
+              {result.skipped} {result.skipped === 1 ? "contact has" : "contacts have"} no phone number saved, so we couldn't reach them.
+            </p>
+          )}
+        </div>
+        <button onClick={onDone} className="mt-8 px-6 py-3 rounded-full text-[12px] font-bold tracking-wide"
+          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+          DONE
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6" style={{ background: "#EFE9DA" }}>
+    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-10 pb-12" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
-      <div className="w-full" style={{ maxWidth: "360px" }}>
+      <div className="w-full" style={{ maxWidth: "380px" }}>
         <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Send this check-in</h1>
-        <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Pick a saved group, or create a new link — even just one friend is fine.</p>
+        <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
+          Pick a group or a few people. Anyone already on the app gets a notification right away.
+        </p>
 
-        {mode === "list" && (
+        {groups.length > 0 && (
           <>
-            {circles === null ? (
-              <p className="text-[12px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading\u2026</p>
-            ) : circles.length === 0 ? (
-              <p className="text-[12px] mb-4" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>No saved groups yet.</p>
-            ) : (
-              circles.map((c) => (
-                <div key={c.id} className="w-full flex items-center gap-2 mb-3">
-                  <button onClick={() => openCircle(c)}
-                    className="flex-1 flex items-center justify-between px-4 py-3 rounded-full" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)" }}>
-                    <span className="text-[13px]" style={{ color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}>{c.name}</span>
-                    <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>{c.circle_members?.length || 0} joined</span>
-                  </button>
-                  <button onClick={() => deleteCircle(c)} className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(140,47,69,0.08)" }}>
-                    <Trash2 size={14} color="#8C2F45" />
-                  </button>
-                </div>
-              ))
-            )}
-            <button onClick={() => setMode("new")} className="w-full mt-2 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
-              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              + NEW LINK
-            </button>
+            <p className="text-[10px] tracking-[0.2em] mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>GROUPS</p>
+            {groups.map((g) => {
+              const on = groupIsOn(g);
+              return (
+                <button key={g.id} onClick={() => toggleGroup(g)}
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-2xl mb-2"
+                  style={{ ...pill, background: on ? "#2B2A1F" : "#fff", color: on ? "#EFE9DA" : "#2B2A1F" }}>
+                  <span className="flex items-center gap-2 text-[13px]"><Users size={14} /> {g.name}</span>
+                  {on ? <Check size={14} /> : (
+                    <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.4)" }}>{g.contact_group_members?.length || 0}</span>
+                  )}
+                </button>
+              );
+            })}
+            <div className="mb-6" />
           </>
         )}
 
-        {mode === "new" && (
-          <>
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder={'Name it (optional — e.g. "College Friends")'}
-              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-4"
-              style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
-            />
-            <button onClick={handleCreate} disabled={creating} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
-              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              {creating ? "CREATING\u2026" : "CREATE & GET LINK"}
-            </button>
-            <button onClick={() => setMode("list")} className="w-full mt-3 text-[11px] underline" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>back to saved groups</button>
-          </>
+        <p className="text-[10px] tracking-[0.2em] mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>PEOPLE</p>
+
+        {contacts === null ? (
+          <p className="text-[12px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
+        ) : contacts.length === 0 ? (
+          <p className="text-[12px] leading-relaxed mb-4" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
+            No saved contacts yet. Add some on your profile, or share a one-off link below.
+          </p>
+        ) : (
+          contacts.map((c) => {
+            const on = picked.includes(c.id);
+            return (
+              <button key={c.id} onClick={() => toggleContact(c.id)}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-2xl mb-2"
+                style={{ ...pill, background: on ? "#2B2A1F" : "#fff", color: on ? "#EFE9DA" : "#2B2A1F" }}>
+                <span className="text-[13px]">{c.name}</span>
+                {on ? <Check size={14} /> : (
+                  <span className="text-[10px]" style={{ color: c.linked_user_id ? "#4B5E33" : "rgba(43,42,31,0.35)" }}>
+                    {c.linked_user_id ? "notify" : "text"}
+                  </span>
+                )}
+              </button>
+            );
+          })
         )}
+
+        <button onClick={send} disabled={picked.length === 0 || sending}
+          className="w-full mt-5 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
+          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+          {sending ? "SENDING…" : picked.length === 0 ? "SEND" : `SEND TO ${picked.length}`}
+        </button>
+
+        <button onClick={shareGenericLink} className="w-full mt-4 text-[11px] underline"
+          style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
+          or share a one-off link
+        </button>
 
         {error && <p className="text-[12px] mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
 
@@ -546,7 +924,7 @@ function InboxScreen({ userId, onBack }) {
         </div>
 
         {checkins === null ? (
-          <p className="text-[13px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading\u2026</p>
+          <p className="text-[13px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
         ) : visible.length === 0 ? (
           <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
             {tab === "inbox"
@@ -666,7 +1044,7 @@ function AuthScreen() {
                   className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
                   style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
                 >
-                  {loading ? "SENDING\u2026" : "SEND SIGN-IN LINK"}
+                  {loading ? "SENDING…" : "SEND SIGN-IN LINK"}
                 </button>
               </form>
             </div>
@@ -711,7 +1089,10 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [joinError, setJoinError] = useState(null);
-  const [notifStatus, setNotifStatus] = useState("idle");
+  const [notifStatus, setNotifStatus] = useState(() =>
+    typeof Notification !== "undefined" && Notification.permission === "granted" ? "enabled" : "idle"
+  );
+  const [showPrimer, setShowPrimer] = useState(false);
 
   const [pendingInvite] = useState(() => {
     const match = window.location.pathname.match(/^\/invite\/([^/]+)/);
@@ -753,6 +1134,13 @@ export default function App() {
         { onConflict: "circle_id,user_id" }
       );
 
+      // If this invite was made for a specific saved contact, bind that
+      // contact to this account. From now on the sender can notify them
+      // directly instead of texting a link.
+      await supabase
+        .rpc("link_contact_on_join", { p_circle_id: circle.id, p_user_id: session.user.id })
+        .catch(() => {});
+
       if (pendingInvite.checkinGroupId) {
         const { error: joinInsertErr } = await supabase.from("group_members").insert({
           group_id: pendingInvite.checkinGroupId,
@@ -779,11 +1167,38 @@ export default function App() {
     })();
   }, [session, pendingInvite]);
 
+  // First open after sign-in: ask about notifications once, and only once.
+  // Skipping is remembered, and the toggle always lives on the profile.
+  useEffect(() => {
+    if (!session || pendingInvite) return;
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission !== "default") return;
+    let asked = null;
+    try { asked = window.localStorage.getItem(NOTIF_ASKED_KEY); } catch {}
+    if (!asked) setShowPrimer(true);
+  }, [session, pendingInvite]);
+
+  const markPrimerSeen = () => {
+    try { window.localStorage.setItem(NOTIF_ASKED_KEY, "1"); } catch {}
+  };
+
   const filledCount = Object.values(cardEntries).filter((v) => v.trim().length > 0).length;
 
   const handleEnableNotifications = async () => {
     const { error } = await enablePushNotifications(session.user.id);
     setNotifStatus(error ? "error" : "enabled");
+    return !error;
+  };
+
+  const handlePrimerEnable = async () => {
+    const ok = await handleEnableNotifications();
+    markPrimerSeen();
+    if (ok) setShowPrimer(false);
+  };
+
+  const handlePrimerSkip = () => {
+    markPrimerSeen();
+    setShowPrimer(false);
   };
 
   const startCheckIn = () => {
@@ -885,14 +1300,30 @@ export default function App() {
             </button>
           </>
         ) : (
-          <p className="text-[14px]" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Joining\u2026</p>
+          <p className="text-[14px]" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Joining…</p>
         )}
       </div>
     );
   }
 
+  if (showPrimer) {
+    return <NotificationPrimer onEnable={handlePrimerEnable} onSkip={handlePrimerSkip} status={notifStatus} />;
+  }
+
   if (stage === "inbox") {
     return <InboxScreen userId={session.user.id} onBack={() => setStage("home")} />;
+  }
+
+  if (stage === "profile") {
+    return (
+      <ProfileScreen
+        userId={session.user.id}
+        email={session.user.email}
+        onBack={() => setStage("home")}
+        notifStatus={notifStatus}
+        onEnableNotifications={handleEnableNotifications}
+      />
+    );
   }
 
   if (stage === "cards") {
@@ -920,9 +1351,8 @@ export default function App() {
       readCount={0}
       onOpenCards={startCheckIn}
       onOpenInbox={() => setStage("inbox")}
+      onOpenProfile={() => setStage("profile")}
       saveError={saveError}
-      onEnableNotifications={handleEnableNotifications}
-      notifStatus={notifStatus}
     />
   );
 }
