@@ -288,6 +288,16 @@ async function enablePushNotifications(userId) {
 }
 
 function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, onOpenInbox, onOpenProfile, saveError }) {
+  const [showInstall, setShowInstall] = useState(() => {
+    if (isStandalone()) return false;
+    try { return !window.localStorage.getItem(INSTALL_DISMISSED_KEY); } catch { return true; }
+  });
+
+  const dismissInstall = () => {
+    try { window.localStorage.setItem(INSTALL_DISMISSED_KEY, "1"); } catch {}
+    setShowInstall(false);
+  };
+
   const cardsDone = filledCount >= 3;
   const inboxDone = waitingCount === 0 && readCount > 0;
 
@@ -371,17 +381,43 @@ function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, 
           Rose, Bud, Thorn is a simple way to connect with people in your life
         </p>
 
-        <div className="mt-5 mx-auto" style={{ maxWidth: "280px" }}>
+        {showInstall && (
+          <div className="mx-auto w-full" style={{ maxWidth: "300px" }}>
+            <InstallBanner onDismiss={dismissInstall} />
+          </div>
+        )}
+
+        {/* One grid for all three rows, so a wrapped description hangs under
+            the description above it rather than under the label. */}
+        <div className="mt-5 mx-auto" style={{
+          maxWidth: "280px",
+          display: "grid",
+          gridTemplateColumns: "auto 1fr",
+          columnGap: "6px",
+          rowGap: "8px",
+          color: hexToRgba(ENTRY_INK, 0.75),
+          fontFamily: "'Permanent Marker', cursive",
+        }}>
           {[
             ["rose", "something good"],
             ["bud", "something you're looking forward to"],
             ["thorn", "something that's been a little rough"],
           ].map(([type, meaning]) => (
-            <p key={type} className="text-[13px] leading-relaxed mb-2" style={{ color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Permanent Marker', cursive" }}>
-              <span style={{ color: TYPE_INK[type] }}>{TYPE_LABELS[type]}</span> — {meaning}
-            </p>
+            <React.Fragment key={type}>
+              <span className="text-[13px] leading-relaxed whitespace-nowrap">{TYPE_LABELS[type]} —</span>
+              <span className="text-[13px] leading-relaxed">{meaning}</span>
+            </React.Fragment>
           ))}
         </div>
+
+        <p className="text-center mt-8 mx-auto text-[11px]" style={{
+          maxWidth: "280px",
+          color: hexToRgba(ENTRY_INK, 0.5),
+          fontFamily: "'Fraunces', serif",
+          fontStyle: "italic",
+        }}>
+          Messages automatically deleted after 24 hours.
+        </p>
 
         </div>
       </div>
@@ -390,8 +426,114 @@ function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, 
 }
 
 const NOTIF_ASKED_KEY = "rbt_notif_asked_v1";
+const INSTALL_DISMISSED_KEY = "rbt_install_dismissed_v1";
+
+// Already added to the home screen? Then it launches without browser chrome.
+function isStandalone() {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true
+  );
+}
+
+function isIOS() {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+// iOS gives no install API at all -- Safari only allows notifications for
+// installed apps, so these steps are the only route to them on an iPhone.
+function InstallSteps({ compact }) {
+  const line = {
+    color: "rgba(43,42,31,0.7)",
+    fontFamily: "'Fraunces', serif",
+  };
+
+  if (isIOS()) {
+    return (
+      <div className={compact ? "" : "mt-2"} style={{ maxWidth: "300px" }}>
+        <p className="text-[13px] leading-relaxed mb-2" style={line}>
+          1. Tap the Share button at the bottom of Safari (the square with an arrow).
+        </p>
+        <p className="text-[13px] leading-relaxed mb-2" style={line}>
+          2. Scroll down and tap <strong>Add to Home Screen</strong>.
+        </p>
+        <p className="text-[13px] leading-relaxed" style={line}>
+          3. Open Rose, Bud, Thorn from your home screen from now on.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={compact ? "" : "mt-2"} style={{ maxWidth: "300px" }}>
+      <p className="text-[13px] leading-relaxed mb-2" style={line}>
+        1. Open your browser's menu (the three dots).
+      </p>
+      <p className="text-[13px] leading-relaxed" style={line}>
+        2. Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+      </p>
+    </div>
+  );
+}
+
+// Quiet, dismissible nudge on the home screen. Not a blocker -- people who
+// only want to read a friend's check-in should never be stopped by it.
+function InstallBanner({ onDismiss }) {
+  const [prompt, setPrompt] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const handler = (e) => { e.preventDefault(); setPrompt(e); };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const install = async () => {
+    if (!prompt) { setExpanded((v) => !v); return; }
+    prompt.prompt();
+    await prompt.userChoice;
+    setPrompt(null);
+    onDismiss();
+  };
+
+  return (
+    <div className="w-full rounded-2xl px-4 py-3 mt-5"
+      style={{ background: "rgba(43,42,31,0.05)", border: "1px solid rgba(43,42,31,0.1)" }}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <p className="text-[12px] leading-relaxed" style={{ color: "rgba(43,42,31,0.75)", fontFamily: "'Fraunces', serif" }}>
+            Add Rose, Bud, Thorn to your home screen so you get reminders and check-ins from friends.
+          </p>
+          <button onClick={install} className="text-[11px] underline mt-1.5"
+            style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+            {prompt ? "install" : expanded ? "hide" : "how"}
+          </button>
+        </div>
+        <button onClick={onDismiss} className="shrink-0 text-[11px] px-2"
+          style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
+          ✕
+        </button>
+      </div>
+
+      {expanded && !prompt && (
+        <div className="mt-3">
+          <InstallSteps compact />
+          <p className="text-[11px] leading-relaxed mt-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif" }}>
+            You'll sign in once more inside the app — the installed version keeps its own session.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function NotificationPrimer({ onEnable, onSkip, status }) {
+  // Safari blocks the permission prompt outright in a browser tab.
+  const needsInstall = isIOS() && !isStandalone();
+
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
@@ -413,19 +555,34 @@ function NotificationPrimer({ onEnable, onSkip, status }) {
       </p>
 
       <div className="w-full" style={{ maxWidth: "300px" }}>
-        <button onClick={onEnable} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
-          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-          TURN ON NOTIFICATIONS
-        </button>
-        <button onClick={onSkip} className="w-full mt-4 text-[11px] underline"
-          style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-          not now
-        </button>
+        {needsInstall ? (
+          <>
+            <p className="text-[12px] leading-relaxed mb-4" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif" }}>
+              On iPhone, notifications only work once the app is on your home screen:
+            </p>
+            <InstallSteps compact />
+            <button onClick={onSkip} className="w-full mt-6 text-[11px] underline"
+              style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+              continue without notifications
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={onEnable} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+              TURN ON NOTIFICATIONS
+            </button>
+            <button onClick={onSkip} className="w-full mt-4 text-[11px] underline"
+              style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+              not now
+            </button>
+          </>
+        )}
       </div>
 
-      {status === "error" && (
+      {status === "error" && !needsInstall && (
         <p className="text-[12px] mt-5" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif", maxWidth: "290px" }}>
-          Couldn't turn them on here. On iPhone, add Rose, Bud, Thorn to your home screen first — Safari only allows notifications for installed apps.
+          Couldn't turn them on on this device.
         </p>
       )}
     </div>
@@ -541,6 +698,7 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const fileRef = useRef(null);
+  const needsInstall = isIOS() && !isStandalone();
 
   const dirty = name.trim() !== (profile?.display_name || "") && name.trim().length > 0;
 
@@ -627,6 +785,10 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
             <span className="flex items-center gap-1 text-[11px]" style={{ color: "#4B5E33" }}>
               <CheckCircle2 size={13} /> ON
             </span>
+          ) : needsInstall ? (
+            <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+              NEEDS INSTALL
+            </span>
           ) : (
             <button onClick={onEnableNotifications} className="text-[11px] px-3 py-1 rounded-full"
               style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
@@ -634,9 +796,17 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
             </button>
           )}
         </div>
-        {notifStatus === "error" && (
+        {needsInstall && notifStatus !== "enabled" && (
+          <div className="mt-2 mb-2">
+            <p className="text-[12px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
+              iPhone only allows notifications for apps on your home screen:
+            </p>
+            <InstallSteps compact />
+          </div>
+        )}
+        {notifStatus === "error" && !needsInstall && (
           <p className="text-[11px] leading-relaxed" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
-            Couldn't turn them on here. On iPhone, add the app to your home screen first, then try again.
+            Couldn't turn them on on this device.
           </p>
         )}
 
@@ -1048,11 +1218,11 @@ function CheckInKind({ onStart, onHome, onProfile, profile }) {
           className="w-full text-left px-4 py-4 rounded-2xl mb-3"
           style={{ ...pill, background: mode === "daily" ? "#2B2A1F" : "#fff", color: mode === "daily" ? "#EFE9DA" : "#2B2A1F" }}>
           <span className="flex items-center justify-between">
-            <span className="text-[14px]">Today</span>
+            <span className="text-[14px]">Life</span>
             {mode === "daily" && <Check size={15} />}
           </span>
           <span className="block text-[11px] mt-1" style={{ opacity: 0.6, fontFamily: "'Fraunces', serif" }}>
-            How your day went.
+            How life treating you.
           </span>
         </button>
 
