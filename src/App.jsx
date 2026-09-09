@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Trash2, User, Bell, Check, Users, Camera, MessageCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Bell, Check, Users, Camera, MessageCircle } from "lucide-react";
 import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
 import { STAMP_IMG, WORD_IMG } from "./assets";
 
@@ -122,7 +122,7 @@ function PostcardBack({ slide, index, value, onChange }) {
   );
 }
 
-function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveError, joinedExisting }) {
+function IntroCarousel({ onBegin, onGoHome, onProfile, profile, entries, setEntries, saving, saveError, joinedExisting }) {
   const [index, setIndex] = useState(0);
   const [dragX, setDragX] = useState(0);
   const start = useRef(null);
@@ -237,6 +237,10 @@ function IntroCarousel({ onBegin, onGoHome, entries, setEntries, saving, saveErr
             <span className="text-[10px] tracking-wide" style={{ color: "rgba(60,48,35,0.6)", fontFamily: "'Special Elite', monospace" }}>SKIP</span>
           </button>
         )}
+        <button onClick={onProfile} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(60,48,35,0.08)" }}>
+          <span className="text-[10px] tracking-wide" style={{ color: "rgba(60,48,35,0.6)", fontFamily: "'Special Elite', monospace" }}>PROFILE</span>
+          <Avatar url={profile?.avatar_url} name={profile?.display_name} size={20} />
+        </button>
       </div>
     </div>
   );
@@ -277,7 +281,7 @@ async function enablePushNotifications(userId) {
   return { error };
 }
 
-function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInbox, onOpenProfile, saveError }) {
+function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, onOpenInbox, onOpenProfile, saveError }) {
   const cardsDone = filledCount >= 3;
   const inboxDone = waitingCount === 0 && readCount > 0;
 
@@ -287,11 +291,11 @@ function DeskHome({ filledCount, waitingCount, readCount, onOpenCards, onOpenInb
 
       <div className="w-full flex flex-col items-center px-6" style={{ maxWidth: "480px" }}>
         <div className="w-full flex items-center justify-between mt-6">
-          <button onClick={onOpenProfile} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
-            <User size={14} color="rgba(43,42,31,0.55)" />
+          <button onClick={onOpenProfile} className="flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
             <span className="text-[11px] tracking-wide" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
               PROFILE
             </span>
+            <Avatar url={profile?.avatar_url} name={profile?.display_name} size={22} />
           </button>
           <button onClick={onOpenInbox} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
             {inboxDone && <CheckCircle2 size={13} color="#4B5E33" />}
@@ -557,9 +561,7 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
     <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
       <div className="w-full" style={{ maxWidth: "400px" }}>
-        <button onClick={onBack} className="flex items-center gap-1 text-[12px] mb-8" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-          <ChevronLeft size={14} /> BACK TO HOME
-        </button>
+        <TopBar onHome={onBack} current="profile" avatarUrl={profile?.avatar_url} name={profile?.display_name} />
 
         {/* ---------- photo + name ---------- */}
         <div className="w-full flex flex-col items-center mb-8">
@@ -645,7 +647,7 @@ function buildSmsHref(numbers, body) {
   return `sms:${list}${sep}body=${encodeURIComponent(body)}`;
 }
 
-function SendScreen({ userId, groupId, onDone }) {
+function SendScreen({ userId, groupId, profile, onDone, onHome, onProfile }) {
   const [contacts, setContacts] = useState(null);
   const [groups, setGroups] = useState([]);
   const [profiles, setProfiles] = useState({});
@@ -796,8 +798,12 @@ function SendScreen({ userId, groupId, onDone }) {
 
   if (result) {
     return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
+      <div className="min-h-screen w-full flex flex-col items-center px-6 pt-8" style={{ background: "#EFE9DA" }}>
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
+        <div className="w-full" style={{ maxWidth: "380px" }}>
+          <TopBar onHome={onHome} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
+        </div>
+        <div className="flex flex-col items-center text-center pt-6">
         <CheckCircle2 size={26} color="#4B5E33" style={{ marginBottom: "14px" }} />
         <h1 className="text-[20px] mb-3" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Sent</h1>
         <div className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif", maxWidth: "300px" }}>
@@ -859,6 +865,7 @@ function SendScreen({ userId, groupId, onDone }) {
           style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
           DONE
         </button>
+        </div>
       </div>
     );
   }
@@ -867,6 +874,7 @@ function SendScreen({ userId, groupId, onDone }) {
     <div className="min-h-screen w-full flex flex-col items-center px-6 pt-10 pb-12" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
       <div className="w-full" style={{ maxWidth: "380px" }}>
+        <TopBar onHome={onHome} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
         <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Send this check-in</h1>
         <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
           {isEmpty
@@ -958,6 +966,32 @@ function SendScreen({ userId, groupId, onDone }) {
 
 const TYPE_LABELS = { rose: "ROSE", bud: "BUD", thorn: "THORN" };
 const TYPE_INK = { rose: "#8C2F45", bud: "#4B5E33", thorn: "#7A4A28" };
+
+// Every signed-in screen gets the same two exits, so no screen is a dead end.
+function TopBar({ onHome, onProfile, current, avatarUrl, name }) {
+  const base = {
+    fontFamily: "'Special Elite', monospace",
+    fontSize: "11px",
+    letterSpacing: "0.05em",
+  };
+
+  return (
+    <div className="w-full flex items-center justify-between mb-7">
+      <button onClick={onHome} disabled={current === "home"}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full disabled:opacity-40"
+        style={{ ...base, background: "rgba(43,42,31,0.06)", color: "rgba(43,42,31,0.6)" }}>
+        <Home size={13} /> HOME
+      </button>
+
+      <button onClick={onProfile} disabled={current === "profile"}
+        className="flex items-center gap-2 px-2 py-1 rounded-full disabled:opacity-40"
+        style={{ ...base, color: "rgba(43,42,31,0.6)" }}>
+        PROFILE
+        <Avatar url={avatarUrl} name={name} size={26} />
+      </button>
+    </div>
+  );
+}
 
 function InvitePreview({ invite, onContinue }) {
   const [state, setState] = useState({ status: "loading", cards: [], name: null, avatar: null });
@@ -1126,7 +1160,7 @@ function CommentThread({ card, groupId, userId, profiles }) {
   );
 }
 
-function InboxScreen({ userId, onBack }) {
+function InboxScreen({ userId, profile, onBack, onProfile }) {
   const [checkins, setCheckins] = useState(null);
   const [profiles, setProfiles] = useState({});
   const [tab, setTab] = useState("inbox");
@@ -1193,9 +1227,7 @@ function InboxScreen({ userId, onBack }) {
     <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
       <div className="w-full max-w-md">
-        <button onClick={onBack} className="flex items-center gap-1 text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-          <ChevronLeft size={14} /> BACK TO HOME
-        </button>
+        <TopBar onHome={onBack} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
 
         <div className="flex items-center gap-2 mb-6">
           <button onClick={() => setTab("inbox")} className="px-4 py-2 rounded-full text-[12px] font-bold tracking-wide"
@@ -1680,7 +1712,14 @@ export default function App() {
   }
 
   if (stage === "inbox") {
-    return <InboxScreen userId={session.user.id} onBack={() => setStage("home")} />;
+    return (
+      <InboxScreen
+        userId={session.user.id}
+        profile={profile}
+        onBack={() => setStage("home")}
+        onProfile={() => setStage("profile")}
+      />
+    );
   }
 
   if (stage === "profile") {
@@ -1704,6 +1743,8 @@ export default function App() {
         setEntries={setCardEntries}
         onBegin={finishCheckIn}
         onGoHome={() => setStage("home")}
+        onProfile={() => setStage("profile")}
+        profile={profile}
         saving={saving}
         saveError={saveError}
         joinedExisting={joinedExisting}
@@ -1712,7 +1753,16 @@ export default function App() {
   }
 
   if (stage === "send") {
-    return <SendScreen userId={session.user.id} groupId={groupId} onDone={() => setStage("home")} />;
+    return (
+      <SendScreen
+        userId={session.user.id}
+        groupId={groupId}
+        profile={profile}
+        onDone={() => setStage("home")}
+        onHome={() => setStage("home")}
+        onProfile={() => setStage("profile")}
+      />
+    );
   }
 
   return (
@@ -1720,6 +1770,7 @@ export default function App() {
       filledCount={filledCount}
       waitingCount={0}
       readCount={0}
+      profile={profile}
       onOpenCards={startCheckIn}
       onOpenInbox={() => setStage("inbox")}
       onOpenProfile={() => setStage("profile")}
