@@ -122,7 +122,7 @@ function PostcardBack({ slide, index, value, onChange }) {
   );
 }
 
-function IntroCarousel({ onBegin, onGoHome, onProfile, profile, entries, setEntries, saving, saveError, joinedExisting }) {
+function IntroCarousel({ onBegin, onGoHome, onProfile, profile, title, entries, setEntries, saving, saveError, joinedExisting }) {
   const [index, setIndex] = useState(0);
   const [dragX, setDragX] = useState(0);
   const start = useRef(null);
@@ -183,6 +183,12 @@ function IntroCarousel({ onBegin, onGoHome, onProfile, profile, entries, setEntr
         {index === 0 ? "Swipe to begin" : `Card ${index + 1} of ${INTRO_SLIDES.length}`}
       </span>
 
+      {title && (
+        <p className="text-[15px] text-center mb-3 px-4" style={{ color: hexToRgba(ENTRY_INK, 0.8), fontFamily: "'Permanent Marker', cursive" }}>
+          {title}
+        </p>
+      )}
+
       {joinedExisting && (
         <p className="text-[12px] text-center leading-relaxed mb-4 px-4" style={{ color: "rgba(60,48,35,0.7)", fontFamily: "'Fraunces', serif", fontStyle: "italic", maxWidth: "340px" }}>
           Fill out your rose, bud & thorn to see what they shared.
@@ -219,7 +225,7 @@ function IntroCarousel({ onBegin, onGoHome, onProfile, profile, entries, setEntr
         <div className="flex flex-col items-center">
           <button onClick={onBegin} disabled={saving} className="mt-6 flex items-center gap-2 px-5 py-2.5 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-60"
             style={{ background: "#2B2A1F", color: "#E9DCBE", fontFamily: "'Special Elite', monospace" }}>
-            {saving ? "SAVING…" : (<>BEGIN TODAY'S CHECK-IN <ArrowRight size={13} /></>)}
+            {saving ? "SAVING…" : (<>{title ? "SAVE MY CARDS" : "BEGIN TODAY'S CHECK-IN"} <ArrowRight size={13} /></>)}
           </button>
           {saveError && (
             <p className="text-[11px] mt-2" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{saveError}</p>
@@ -362,8 +368,23 @@ function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, 
         )}
 
         <p className="text-center mt-8 mx-auto text-[13px] leading-relaxed" style={{ maxWidth: "280px", color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Permanent Marker', cursive" }}>
-          Rose, Bud, Thorn is a simple way to stay part of your friends' everyday lives. Share something good, something you're looking forward to, and something that's been a little rough. It's part game, part check-in, and an easy way to feel closer even when life gets busy.
+          Rose, Bud, Thorn is a simple way to connect with people in your life
         </p>
+
+        <div className="mt-5 mx-auto" style={{ maxWidth: "280px" }}>
+          {[
+            ["rose", "something good"],
+            ["bud", "something you're looking forward to"],
+            ["thorn", "something that's been a little rough"],
+          ].map(([type, meaning]) => (
+            <p key={type} className="text-[13px] leading-relaxed mb-1.5" style={{ color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Fraunces', serif" }}>
+              <span style={{ color: TYPE_INK[type], fontFamily: "'Special Elite', monospace", fontSize: "11px", letterSpacing: "0.1em" }}>
+                {TYPE_LABELS[type]}
+              </span>{" "}
+              — {meaning}
+            </p>
+          ))}
+        </div>
 
         </div>
       </div>
@@ -518,6 +539,7 @@ function NameStep({ initialName, onSave, saving, error }) {
 
 function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifStatus, onEnableNotifications }) {
   const [name, setName] = useState(profile?.display_name || "");
+  const [checkInTitle, setCheckInTitle] = useState(null);
   const [savingName, setSavingName] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
@@ -638,6 +660,14 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
   );
 }
 
+// "Burning Man Rose, Bud, Thorn -- how was it for you?" reads like a real
+// invitation; the generic version does not say what it is about.
+function inviteMessage(title, url) {
+  return title
+    ? `${title} Rose, Bud, Thorn — how was it for you? Join me: ${url}`
+    : `How was your day? I want to hear about it — join me on Rose, Bud, Thorn: ${url}`;
+}
+
 // Builds a single SMS deep link addressed to everyone who isn't on the app yet.
 // iOS and Android disagree on the separator before `body`, hence the sniff.
 function buildSmsHref(numbers, body) {
@@ -647,7 +677,7 @@ function buildSmsHref(numbers, body) {
   return `sms:${list}${sep}body=${encodeURIComponent(body)}`;
 }
 
-function SendScreen({ userId, groupId, profile, onDone, onHome, onProfile }) {
+function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile }) {
   const [contacts, setContacts] = useState(null);
   const [groups, setGroups] = useState([]);
   const [profiles, setProfiles] = useState({});
@@ -737,7 +767,7 @@ function SendScreen({ userId, groupId, profile, onDone, onHome, onProfile }) {
           withPhones.length === 1 ? withPhones[0].id : null
         );
         const url = `${window.location.origin}/invite/${circle.invite_token}?checkin=${groupId}`;
-        const body = `How was your day? I want to hear about it — join me on Rose, Bud, Thorn: ${url}`;
+        const body = inviteMessage(title, url);
         window.location.href = buildSmsHref(withPhones.map((c) => c.phone), body);
         smsOpened = true;
       }
@@ -778,7 +808,7 @@ function SendScreen({ userId, groupId, profile, onDone, onHome, onProfile }) {
     try {
       const circle = await makeCircle("Check-in", null);
       const url = `${window.location.origin}/invite/${circle.invite_token}?checkin=${groupId}`;
-      const msg = `How was your day? I want to hear about it — join me on Rose, Bud, Thorn: ${url}`;
+      const msg = inviteMessage(title, url);
       if (navigator.share) {
         try { await navigator.share({ text: msg }); } catch { return; }
         setResult({ shared: true, copied: false });
@@ -875,7 +905,9 @@ function SendScreen({ userId, groupId, profile, onDone, onHome, onProfile }) {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
       <div className="w-full" style={{ maxWidth: "380px" }}>
         <TopBar onHome={onHome} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
-        <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Send this check-in</h1>
+        <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>
+          {title ? `Send your ${title} cards` : "Send this check-in"}
+        </h1>
         <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
           {isEmpty
             ? "Nobody to pick from yet — here's how the first one works."
@@ -995,6 +1027,81 @@ function TopBar({ onHome, onProfile, current, avatarUrl, name }) {
 
 // Signed-out invite landing. Shows WHO is waiting on you, never what they
 // wrote -- card content stays behind the account.
+// Before writing: is this about today, or about a thing that happened?
+// The answer changes the invite wording and how long it stays open.
+function CheckInKind({ onStart, onHome, onProfile, profile }) {
+  const [mode, setMode] = useState(null);
+  const [title, setTitle] = useState("");
+
+  const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
+
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
+      <div className="w-full" style={{ maxWidth: "380px" }}>
+        <TopBar onHome={onHome} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
+
+        <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>
+          What's this one about?
+        </h1>
+        <p className="text-[12px] mb-7" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
+          Whoever you send it to will see the same thing, so they know what they're answering.
+        </p>
+
+        <button onClick={() => setMode("daily")}
+          className="w-full text-left px-4 py-4 rounded-2xl mb-3"
+          style={{ ...pill, background: mode === "daily" ? "#2B2A1F" : "#fff", color: mode === "daily" ? "#EFE9DA" : "#2B2A1F" }}>
+          <span className="flex items-center justify-between">
+            <span className="text-[14px]">Today</span>
+            {mode === "daily" && <Check size={15} />}
+          </span>
+          <span className="block text-[11px] mt-1" style={{ opacity: 0.6, fontFamily: "'Fraunces', serif" }}>
+            How your day went.
+          </span>
+        </button>
+
+        <button onClick={() => setMode("event")}
+          className="w-full text-left px-4 py-4 rounded-2xl mb-3"
+          style={{ ...pill, background: mode === "event" ? "#2B2A1F" : "#fff", color: mode === "event" ? "#EFE9DA" : "#2B2A1F" }}>
+          <span className="flex items-center justify-between">
+            <span className="text-[14px]">An event</span>
+            {mode === "event" && <Check size={15} />}
+          </span>
+          <span className="block text-[11px] mt-1" style={{ opacity: 0.6, fontFamily: "'Fraunces', serif" }}>
+            A trip, a wedding, a festival — something you all went through.
+          </span>
+        </button>
+
+        {mode === "event" && (
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Name it — e.g. Burning Man"
+            maxLength={50}
+            autoFocus
+            className="w-full px-4 py-3 rounded-full text-[13px] outline-none mt-2 mb-1"
+            style={pill}
+          />
+        )}
+
+        <button
+          onClick={() => onStart(mode === "event" ? title.trim() : null)}
+          disabled={!mode || (mode === "event" && !title.trim())}
+          className="w-full mt-6 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
+          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+          START
+        </button>
+
+        {mode === "event" && (
+          <p className="text-[11px] leading-relaxed mt-4 text-center" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif" }}>
+            Event check-ins stay open for a week, so people can answer once they're home.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function InviteWelcome({ invite }) {
   const [sender, setSender] = useState(null);
 
@@ -1034,7 +1141,7 @@ function ReceivedCheckIn({ groupId, onContinue }) {
     (async () => {
       const { data: group } = await supabase
         .from("groups")
-        .select("id, created_by")
+        .select("id, created_by, title")
         .eq("id", groupId)
         .maybeSingle();
 
@@ -1055,6 +1162,7 @@ function ReceivedCheckIn({ groupId, onContinue }) {
       const author = (people || []).find((p) => p.id === group.created_by);
       setState({
         cards: cards || [],
+        title: group.title,
         name: (author && author.display_name) || "Your friend",
         avatar: author && author.avatar_url,
       });
@@ -1080,7 +1188,7 @@ function ReceivedCheckIn({ groupId, onContinue }) {
         <div className="flex flex-col items-center text-center mb-9">
           <Avatar url={state.avatar} name={state.name} size={64} />
           <p className="text-[17px] mt-4" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
-            {state.name}'s day
+            {state.title ? `${state.name} on ${state.title}` : `${state.name}'s day`}
           </p>
         </div>
 
@@ -1098,7 +1206,7 @@ function ReceivedCheckIn({ groupId, onContinue }) {
 
         <div className="mt-9 text-center">
           <p className="text-[13px] leading-relaxed mb-5" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-            A rose is something good, a bud is something you're looking forward to, a thorn is something hard. Send {state.name} yours.
+            A rose is something good, a bud is something you're looking forward to, a thorn is something hard. Send {state.name} yours{state.title ? ` from ${state.title}` : ""}.
           </p>
           <button onClick={onContinue}
             className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
@@ -1218,7 +1326,7 @@ function InboxScreen({ userId, profile, onBack, onProfile }) {
     (async () => {
       const { data: memberships } = await supabase
         .from("group_members")
-        .select("group_id, groups(id, created_at, expires_at, created_by)")
+        .select("group_id, groups(id, created_at, expires_at, created_by, title)")
         .eq("user_id", userId);
 
       const groups = (memberships || [])
@@ -1300,6 +1408,7 @@ function InboxScreen({ userId, profile, onBack, onProfile }) {
             <div key={g.id} className="mb-7 pb-6" style={{ borderBottom: "1px solid rgba(43,42,31,0.1)" }}>
               <p className="text-[10px] tracking-wide mb-4" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
                 {new Date(g.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                {g.title ? ` · ${g.title.toUpperCase()}` : ""}
               </p>
 
               {byAuthor(g.cards).map((author) => (
@@ -1647,6 +1756,12 @@ export default function App() {
     setCardEntries({ rose: "", bud: "", thorn: "" });
     setGroupId(null);
     setJoinedExisting(false);
+    setCheckInTitle(null);
+    setStage("kind");
+  };
+
+  const beginWithKind = (title) => {
+    setCheckInTitle(title);
     setStage("cards");
   };
 
@@ -1657,9 +1772,17 @@ export default function App() {
     let targetGroupId = groupId;
 
     if (!targetGroupId) {
+      // Events stay open a week -- people answer once they are home,
+      // not the same night. Everyday check-ins keep the 24h default.
+      const insert = { created_by: session.user.id };
+      if (checkInTitle) {
+        insert.title = checkInTitle;
+        insert.expires_at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      }
+
       const { data: group, error: groupErr } = await supabase
         .from("groups")
-        .insert({ created_by: session.user.id })
+        .insert(insert)
         .select()
         .single();
 
@@ -1784,6 +1907,17 @@ export default function App() {
     );
   }
 
+  if (stage === "kind") {
+    return (
+      <CheckInKind
+        onStart={beginWithKind}
+        onHome={() => setStage("home")}
+        onProfile={() => setStage("profile")}
+        profile={profile}
+      />
+    );
+  }
+
   if (stage === "received") {
     return <ReceivedCheckIn groupId={groupId} onContinue={() => setStage("cards")} />;
   }
@@ -1794,6 +1928,7 @@ export default function App() {
         entries={cardEntries}
         setEntries={setCardEntries}
         onBegin={finishCheckIn}
+        title={checkInTitle}
         onGoHome={() => setStage("home")}
         onProfile={() => setStage("profile")}
         profile={profile}
@@ -1810,6 +1945,7 @@ export default function App() {
         userId={session.user.id}
         groupId={groupId}
         profile={profile}
+        title={checkInTitle}
         onDone={() => setStage("home")}
         onHome={() => setStage("home")}
         onProfile={() => setStage("profile")}
