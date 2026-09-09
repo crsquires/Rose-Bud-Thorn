@@ -1,2205 +1,560 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
-import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Bell, Check, Users, Camera, MessageCircle } from "lucide-react";
-import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
-import { STAMP_IMG, WORD_IMG } from "./assets";
+// Snapshot taken: 2026-08-14 (Whittle This project — verify against Project Knowledge doc for anything newer)
+import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
 
-function hexToRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
+dotenv.config();
+
+export const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+export const REMOVEBG_API_KEY = process.env.REMOVEBG_API_KEY;
+
+export const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY)
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+  : null;
+
+export function ideaSlug(idea) {
+  return idea.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
-const ENTRY_INK = "#3E4E5A";
-
-function fadedRuledLines(spacing, color) {
-  return `repeating-linear-gradient(to bottom, transparent 0, transparent ${spacing - 1}px, ${color} ${spacing - 1}px, ${color} ${spacing}px)`;
-}
-
-const NOISE_BG = "url(\"data:image/svg+xml;utf8," + encodeURIComponent(
-  "<svg xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"
-) + "\")";
-
-const STAIN_SETS = [
-  "radial-gradient(ellipse 190px 150px at 4% 8%, rgba(110,85,55,0.28), transparent 55%), radial-gradient(ellipse 90px 60px at 92% 10%, rgba(120,90,50,0.12), transparent 65%), radial-gradient(circle 50px at 55% 30%, rgba(120,90,50,0.08), transparent 70%)",
-  "radial-gradient(ellipse 110px 130px at 95% 75%, rgba(120,90,50,0.15), transparent 60%), radial-gradient(circle 70px at 12% 20%, rgba(120,90,50,0.1), transparent 65%), radial-gradient(ellipse 80px 50px at 40% 90%, rgba(120,90,50,0.1), transparent 70%)",
-  "radial-gradient(circle 90px at 15% 55%, rgba(120,90,50,0.14), transparent 62%), radial-gradient(ellipse 100px 70px at 85% 88%, rgba(120,90,50,0.12), transparent 65%), radial-gradient(circle 45px at 70% 15%, rgba(120,90,50,0.09), transparent 70%)",
-];
-
-const TODAY_STR = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase();
-
-
-function DatePostmark({ ink }) {
-  const uid = ink.replace("#", "");
-  const topId = `pmTop-${uid}`;
-  const botId = `pmBot-${uid}`;
-  return (
-    <div className="absolute" style={{ left: "68%", top: "20%", width: "21%", aspectRatio: "1", opacity: 0.55, transform: "rotate(-8deg)" }}>
-      <svg viewBox="0 0 100 100" width="100%" height="100%">
-        <defs>
-          <path id={topId} d="M 18 50 A 30 30 0 0 1 82 50" fill="none" />
-          <path id={botId} d="M 18 54 A 30 30 0 0 0 82 54" fill="none" />
-        </defs>
-        <circle cx="50" cy="50" r="30" fill="none" stroke={ink} strokeWidth="0.9" opacity="0.6" />
-        <circle cx="50" cy="50" r="25" fill="none" stroke={ink} strokeWidth="0.5" strokeDasharray="1.5,1.5" opacity="0.4" />
-        <text fontSize="11" fontWeight="bold" fill={ink} fontFamily="'Special Elite', monospace" letterSpacing="1">
-          <textPath href={`#${topId}`} startOffset="50%" textAnchor="middle">POSTED</textPath>
-        </text>
-        <text fontSize="10" fill={ink} fontFamily="'Special Elite', monospace">
-          <textPath href={`#${botId}`} startOffset="50%" textAnchor="middle">{TODAY_STR}</textPath>
-        </text>
-      </svg>
-    </div>
-  );
-}
-
-function BrandStamp({ ink }) {
-  return (
-    <div className="relative shrink-0" style={{ width: "100%", aspectRatio: "0.85", transform: "rotate(-4deg)" }}>
-      <img src={STAMP_IMG} alt="Rose, Bud, Thorn stamp" className="w-full h-full object-contain" style={{ opacity: 0.75, filter: "sepia(0.35) saturate(0.7) contrast(0.9) brightness(1.04) drop-shadow(2px 4px 3px rgba(40,30,15,0.35))" }} />
-    </div>
-  );
-}
-
-const INTRO_SLIDES = [
-  { key: "rose", word: "Rose", note: "something good, or a recent highlight.", ink: "#8C2F45" },
-  { key: "bud", word: "Bud", note: "something growing, or hopeful about.", ink: "#4B5E33" },
-  { key: "thorn", word: "Thorn", note: "something hard, or a recent struggle.", ink: "#7A4A28" },
-];
-
-function PostcardBack({ slide, index, value, onChange }) {
-  const { word, note, ink } = slide;
-  const leftLines = useMemo(() => fadedRuledLines(24, "rgba(80,62,38,0.14)"), []);
-  const rightLines = useMemo(() => fadedRuledLines(19, "rgba(80,62,38,0.12)"), []);
-  return (
-    <div className="relative w-full h-full overflow-hidden flex flex-col" style={{
-      background: "#E9DCBE",
-      boxShadow: "inset 0 0 50px rgba(90,65,35,0.22), inset 0 0 10px rgba(60,42,20,0.2), 0 1px 0 rgba(0,0,0,0.05), 0 16px 34px -14px rgba(43,42,31,0.45)",
-      border: "1px solid rgba(100,80,50,0.35)",
-      borderRadius: "6px 10px 8px 12px",
-    }}>
-      <div className="absolute inset-0 pointer-events-none" style={{ background: STAIN_SETS[index % STAIN_SETS.length] }} />
-      <div className="absolute inset-0 pointer-events-none" style={{ boxShadow: "inset 0 0 4px rgba(70,50,25,0.35)" }} />
-
-      <img src={WORD_IMG[slide.key]} alt={word} className="absolute object-contain object-left" style={{ left: "54%", top: "5%", width: "24%", filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.1))" }} />
-
-      <div className="absolute" style={{ top: "4%", right: "4%", width: "19%" }}>
-        <BrandStamp ink={ink} />
-      </div>
-
-      <DatePostmark ink={ink} />
-
-      <div className="absolute pointer-events-none" style={{ left: "50%", top: "7%", bottom: "10%", width: "1px", background: "rgba(100,75,45,0.4)" }} />
-
-      <div className="absolute overflow-hidden" style={{ left: "5%", top: "9%", width: "39%", bottom: "8%", backgroundImage: leftLines, backgroundPosition: "0 3px" }}>
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onDragStart={(e) => e.preventDefault()}
-          placeholder={`Type your ${word.toLowerCase()} here…`}
-          className="rbt-entry w-full h-full resize-none bg-transparent outline-none border-none"
-          style={{
-            "--ph-color": ENTRY_INK,
-            color: hexToRgba(ENTRY_INK, 0.7),
-            fontFamily: "'Permanent Marker', cursive",
-            fontSize: "14px",
-            lineHeight: "24px",
-            boxSizing: "border-box",
-            padding: "0",
-            wordBreak: "break-word",
-            overflowWrap: "break-word",
-            whiteSpace: "pre-wrap",
-            textShadow: "0.4px 0.4px 0 rgba(60,42,20,0.12)",
-          }}
-          maxLength={220}
-        />
-      </div>
-
-      <div className="absolute overflow-hidden" style={{ left: "58%", top: "62%", width: "33%", height: "57px", backgroundImage: rightLines, backgroundPosition: "0 3px" }}>
-        <p className="text-left" style={{ margin: 0, lineHeight: "19px", color: hexToRgba(ENTRY_INK, 0.7), fontFamily: "'Permanent Marker', cursive", fontSize: "10.5px", textShadow: "0.4px 0.4px 0 rgba(60,42,20,0.12)" }}>
-          {word.toUpperCase()}: {note}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function IntroCarousel({ onBegin, onGoHome, onProfile, profile, title, entries, setEntries, saving, saveError, joinedExisting }) {
-  const [index, setIndex] = useState(0);
-  const [dragX, setDragX] = useState(0);
-  const start = useRef(null);
-  const axis = useRef(null);
-  const dragging = useRef(false);
-  const go = (i) => setIndex(Math.max(0, Math.min(INTRO_SLIDES.length - 1, i)));
-
-  const point = (e) => (e.touches && e.touches[0] ? e.touches[0] : e);
-
-  const onDown = (e) => {
-    const p = point(e);
-    start.current = { x: p.clientX, y: p.clientY };
-    axis.current = null;
-    dragging.current = true;
-  };
-
-  const onMove = (e) => {
-    if (!dragging.current || !start.current) return;
-    const p = point(e);
-    const dx = p.clientX - start.current.x;
-    const dy = p.clientY - start.current.y;
-
-    // Wait until the gesture is clearly horizontal or vertical before
-    // committing. A tap (tiny movement) never commits, so tapping the
-    // writing area still focuses it and opens the keyboard.
-    if (axis.current === null) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      axis.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
-      if (axis.current === "x" && document.activeElement && document.activeElement.blur) {
-        document.activeElement.blur();
-      }
-    }
-
-    if (axis.current !== "x") return;
-    setDragX(dx);
-  };
-
-  const onUp = () => {
-    if (!dragging.current) return;
-    dragging.current = false;
-    if (axis.current === "x") {
-      if (dragX < -60) go(index + 1);
-      else if (dragX > 60) go(index - 1);
-    }
-    axis.current = null;
-    start.current = null;
-    setDragX(0);
-  };
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center px-4" style={{ background: "#E8DFCB" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Permanent+Marker&display=swap');
-        .rbt-entry::placeholder { color: var(--ph-color); opacity: 0.45; font-family: 'Permanent Marker', cursive; }
-      `}</style>
-
-      <span className="text-[10px] tracking-[0.35em] uppercase mb-4" style={{ color: "rgba(60,48,35,0.55)", fontFamily: "'Special Elite', monospace" }}>
-        {index === 0 ? "Swipe to begin" : `Card ${index + 1} of ${INTRO_SLIDES.length}`}
-      </span>
-
-      {title && (
-        <p className="text-[15px] text-center mb-3 px-4" style={{ color: hexToRgba(ENTRY_INK, 0.8), fontFamily: "'Permanent Marker', cursive" }}>
-          {title}
-        </p>
-      )}
-
-      {joinedExisting && (
-        <p className="text-[12px] text-center leading-relaxed mb-4 px-4" style={{ color: "rgba(60,48,35,0.7)", fontFamily: "'Fraunces', serif", fontStyle: "italic", maxWidth: "340px" }}>
-          Fill out your rose, bud & thorn to see what they shared.
-        </p>
-      )}
-
-      <div className="w-full max-w-md md:max-w-3xl flex items-center gap-4">
-        <button onClick={() => go(index - 1)} disabled={index === 0} className="hidden md:flex shrink-0 items-center justify-center w-10 h-10 rounded-full disabled:opacity-20" style={{ background: "rgba(60,48,35,0.08)" }}>
-          <ChevronLeft size={18} color="rgba(60,48,35,0.7)" />
-        </button>
-
-        <div className="w-full max-w-md md:max-w-xl mx-auto relative overflow-hidden rounded-[3px] touch-pan-y" style={{ aspectRatio: "3 / 2" }} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp} onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}>
-          <div className="flex h-full" style={{ width: `${INTRO_SLIDES.length * 100}%`, transform: `translateX(calc(${-index * (100 / INTRO_SLIDES.length)}% + ${dragX}px))`, transition: axis.current === "x" ? "none" : "transform 320ms cubic-bezier(.2,.8,.2,1)" }}>
-            {INTRO_SLIDES.map((slide, i) => (
-              <div key={slide.key} className="h-full px-1" style={{ width: `${100 / INTRO_SLIDES.length}%` }}>
-                <PostcardBack slide={slide} index={i} value={entries[slide.key]} onChange={(v) => setEntries((s) => ({ ...s, [slide.key]: v }))} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <button onClick={() => go(index + 1)} disabled={index === INTRO_SLIDES.length - 1} className="hidden md:flex shrink-0 items-center justify-center w-10 h-10 rounded-full disabled:opacity-20" style={{ background: "rgba(60,48,35,0.08)" }}>
-          <ChevronRight size={18} color="rgba(60,48,35,0.7)" />
-        </button>
-      </div>
-
-      <div className="flex items-center gap-3 mt-6">
-        {INTRO_SLIDES.map((s, i) => (
-          <button key={s.key} onClick={() => go(i)} className="w-2 h-2 rounded-full transition-all" style={{ background: i === index ? s.ink : "rgba(60,48,35,0.25)", transform: i === index ? "scale(1.3)" : "scale(1)" }} />
-        ))}
-      </div>
-
-      {index === INTRO_SLIDES.length - 1 && (
-        <div className="flex flex-col items-center">
-          <button onClick={onBegin} disabled={saving} className="mt-6 flex items-center gap-2 px-5 py-2.5 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-60"
-            style={{ background: "#2B2A1F", color: "#E9DCBE", fontFamily: "'Special Elite', monospace" }}>
-            {saving ? "SAVING…" : (<>{title ? "SAVE MY CARDS" : "BEGIN TODAY'S CHECK-IN"} <ArrowRight size={13} /></>)}
-          </button>
-          {saveError && (
-            <p className="text-[11px] mt-2" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{saveError}</p>
-          )}
-        </div>
-      )}
-
-      <div className="w-full flex items-center justify-center gap-3 mt-6 mb-6" style={{ maxWidth: "640px" }}>
-        <button onClick={onGoHome} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(60,48,35,0.08)" }}>
-          <Home size={13} color="rgba(60,48,35,0.6)" />
-          <span className="text-[10px] tracking-wide" style={{ color: "rgba(60,48,35,0.6)", fontFamily: "'Special Elite', monospace" }}>HOME</span>
-        </button>
-        {index !== INTRO_SLIDES.length - 1 && (
-          <button onClick={onGoHome} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(60,48,35,0.08)" }}>
-            <span className="text-[10px] tracking-wide" style={{ color: "rgba(60,48,35,0.6)", fontFamily: "'Special Elite', monospace" }}>SKIP</span>
-          </button>
-        )}
-        <button onClick={onProfile} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(60,48,35,0.08)" }}>
-          <span className="text-[10px] tracking-wide" style={{ color: "rgba(60,48,35,0.6)", fontFamily: "'Special Elite', monospace" }}>PROFILE</span>
-          <Avatar url={profile?.avatar_url} name={profile?.display_name} size={20} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const VAPID_PUBLIC_KEY = "BHI7wXECF3F0U9KYT4BIDo3OT4n5DTgvEV0YNVPwqBCRsWUPxu8PrKoKFu2MnmBXVStPEvA7ssOZl8BGEE5FYGA";
-
-function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = window.atob(base64);
-  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
-}
-
-async function enablePushNotifications(userId) {
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    return { error: "Push notifications aren't supported on this browser." };
-  }
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") {
-    return { error: "Notifications permission was not granted." };
-  }
-  const registration = await navigator.serviceWorker.ready;
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-  });
-  const json = subscription.toJSON();
-  const { error } = await supabase.from("push_subscriptions").upsert(
-    {
-      user_id: userId,
-      endpoint: json.endpoint,
-      p256dh: json.keys.p256dh,
-      auth: json.keys.auth,
-    },
-    { onConflict: "endpoint" }
-  );
-  return { error };
-}
-
-function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, onOpenInbox, onOpenProfile, saveError }) {
-  const [showInstall, setShowInstall] = useState(() => {
-    if (isStandalone()) return false;
-    try { return !window.localStorage.getItem(INSTALL_DISMISSED_KEY); } catch { return true; }
-  });
-
-  const dismissInstall = () => {
-    try { window.localStorage.setItem(INSTALL_DISMISSED_KEY, "1"); } catch {}
-    setShowInstall(false);
-  };
-
-  const cardsDone = filledCount >= 3;
-  const inboxDone = waitingCount === 0 && readCount > 0;
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
-
-      <div className="w-full flex flex-col items-center px-6" style={{ maxWidth: "480px" }}>
-        <div className="w-full flex items-center justify-between mt-6">
-          <button onClick={onOpenProfile} className="flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
-            <span className="text-[11px] tracking-wide" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-              PROFILE
-            </span>
-            <Avatar url={profile?.avatar_url} name={profile?.display_name} size={22} />
-          </button>
-          <button onClick={onOpenInbox} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(43,42,31,0.06)" }}>
-            {inboxDone && <CheckCircle2 size={13} color="#4B5E33" />}
-            <Inbox size={14} color="rgba(43,42,31,0.55)" />
-            <span className="text-[11px] tracking-wide" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-              {readCount}/{readCount + waitingCount}
-            </span>
-          </button>
-        </div>
-
-        <div className="flex-1 w-full flex flex-col items-center pt-4">
-        <div className="flex items-end justify-center gap-1 mb-4 w-full mx-auto" style={{ maxWidth: "360px" }}>
-          <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
-          <img src={WORD_IMG.bud} alt="Bud" style={{ width: "30%", height: "auto", transform: "translateY(20px) rotate(3deg)" }} />
-          <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
-        </div>
-
-        <p className="text-[22px] mb-10" style={{ color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Permanent Marker', cursive" }}>
-          Connect with a friend today
-        </p>
-
-        <div className="mb-4 flex items-center gap-1.5 px-3 py-1 rounded-full" style={{ background: "rgba(43,42,31,0.08)" }}>
-          {cardsDone && <CheckCircle2 size={13} color="#4B5E33" />}
-          <span className="text-[12px] tracking-wide" style={{ color: cardsDone ? "#4B5E33" : "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-            {filledCount}/3
-          </span>
-        </div>
-
-        <button onClick={onOpenCards} className="relative block mx-auto" style={{ width: "70vw", maxWidth: "260px", aspectRatio: "3 / 2" }}>
-          <div className="absolute inset-0" style={{
-            background: "#E4D6B0",
-            border: "1px solid rgba(100,80,50,0.35)",
-            borderRadius: "5px 8px 6px 9px",
-            boxShadow: "0 8px 16px -6px rgba(43,42,31,0.3)",
-            transform: "rotate(-3deg) translate(10px, 10px)",
-          }} />
-          <div className="absolute inset-0" style={{
-            background: "#E9DCBE",
-            border: "1px solid rgba(100,80,50,0.4)",
-            borderRadius: "5px 8px 6px 9px",
-            boxShadow: "0 10px 20px -6px rgba(43,42,31,0.32)",
-            transform: "rotate(-3deg) translate(5px, 5px)",
-          }} />
-          <div className="absolute inset-0" style={{
-            background: "#E9DCBE",
-            boxShadow: "0 16px 28px -8px rgba(43,42,31,0.35), 0 1px 0 rgba(255,255,255,0.4)",
-            border: "1px solid rgba(100,80,50,0.4)",
-            borderRadius: "5px 8px 6px 9px",
-            overflow: "hidden",
-            transform: "rotate(-3deg)",
-          }}>
-            <img src={STAMP_IMG} alt="Rose, Bud, Thorn stamp" style={{ position: "absolute", top: "6%", right: "6%", width: "18%", opacity: 0.85, transform: "rotate(-4deg)" }} />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
-              <img src={WORD_IMG.rose} alt="Rose" style={{ height: "26%", opacity: 0.9 }} />
-              <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: "rgba(60,44,20,0.85)", fontFamily: "'Special Elite', monospace" }}>TAP TO BEGIN</span>
-            </div>
-          </div>
-        </button>
-
-        {saveError && (
-          <p className="text-center mt-3 text-[11px]" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
-            {saveError}
-          </p>
-        )}
-
-        <p className="text-center mt-8 mx-auto text-[13px] leading-relaxed" style={{ maxWidth: "280px", color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Permanent Marker', cursive" }}>
-          Rose, Bud, Thorn is a simple way to connect with people in your life
-        </p>
-
-        {showInstall && (
-          <div className="mx-auto w-full" style={{ maxWidth: "300px" }}>
-            <InstallBanner onDismiss={dismissInstall} />
-          </div>
-        )}
-
-        {/* One grid for all three rows, so a wrapped description hangs under
-            the description above it rather than under the label. */}
-        <div className="mt-5 mx-auto" style={{
-          maxWidth: "280px",
-          display: "grid",
-          gridTemplateColumns: "auto 1fr",
-          columnGap: "6px",
-          rowGap: "8px",
-          color: hexToRgba(ENTRY_INK, 0.75),
-          fontFamily: "'Permanent Marker', cursive",
-        }}>
-          {[
-            ["rose", "something good"],
-            ["bud", "something you're looking forward to"],
-            ["thorn", "something that's been a little rough"],
-          ].map(([type, meaning]) => (
-            <React.Fragment key={type}>
-              <span className="text-[13px] leading-relaxed whitespace-nowrap">{TYPE_LABELS[type]} —</span>
-              <span className="text-[13px] leading-relaxed">{meaning}</span>
-            </React.Fragment>
-          ))}
-        </div>
-
-        <p className="text-center mt-8 mx-auto text-[11px]" style={{
-          maxWidth: "280px",
-          color: hexToRgba(ENTRY_INK, 0.5),
-          fontFamily: "'Fraunces', serif",
-          fontStyle: "italic",
-        }}>
-          Messages automatically deleted after 24 hours.
-        </p>
-
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const NOTIF_ASKED_KEY = "rbt_notif_asked_v1";
-const INSTALL_DISMISSED_KEY = "rbt_install_dismissed_v1";
-
-// Already added to the home screen? Then it launches without browser chrome.
-function isStandalone() {
-  if (typeof window === "undefined") return false;
-  return (
-    window.matchMedia("(display-mode: standalone)").matches ||
-    window.navigator.standalone === true
-  );
-}
-
-function isIOS() {
-  if (typeof navigator === "undefined") return false;
-  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
-
-// iOS gives no install API at all -- Safari only allows notifications for
-// installed apps, so these steps are the only route to them on an iPhone.
-function InstallSteps({ compact }) {
-  const line = {
-    color: "rgba(43,42,31,0.7)",
-    fontFamily: "'Fraunces', serif",
-  };
-
-  if (isIOS()) {
-    return (
-      <div className={compact ? "" : "mt-2"} style={{ maxWidth: "300px" }}>
-        <p className="text-[13px] leading-relaxed mb-2" style={line}>
-          1. Tap the Share button at the bottom of Safari (the square with an arrow).
-        </p>
-        <p className="text-[13px] leading-relaxed mb-2" style={line}>
-          2. Scroll down and tap <strong>Add to Home Screen</strong>.
-        </p>
-        <p className="text-[13px] leading-relaxed" style={line}>
-          3. Open Rose, Bud, Thorn from your home screen from now on.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className={compact ? "" : "mt-2"} style={{ maxWidth: "300px" }}>
-      <p className="text-[13px] leading-relaxed mb-2" style={line}>
-        1. Open your browser's menu (the three dots).
-      </p>
-      <p className="text-[13px] leading-relaxed" style={line}>
-        2. Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.
-      </p>
-    </div>
-  );
-}
-
-// Quiet, dismissible nudge on the home screen. Not a blocker -- people who
-// only want to read a friend's check-in should never be stopped by it.
-function InstallBanner({ onDismiss }) {
-  const [prompt, setPrompt] = useState(null);
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    const handler = (e) => { e.preventDefault(); setPrompt(e); };
-    window.addEventListener("beforeinstallprompt", handler);
-    return () => window.removeEventListener("beforeinstallprompt", handler);
-  }, []);
-
-  const install = async () => {
-    if (!prompt) { setExpanded((v) => !v); return; }
-    prompt.prompt();
-    await prompt.userChoice;
-    setPrompt(null);
-    onDismiss();
-  };
-
-  return (
-    <div className="w-full rounded-2xl px-4 py-3 mt-5"
-      style={{ background: "rgba(43,42,31,0.05)", border: "1px solid rgba(43,42,31,0.1)" }}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1">
-          <p className="text-[12px] leading-relaxed" style={{ color: "rgba(43,42,31,0.75)", fontFamily: "'Fraunces', serif" }}>
-            Add Rose, Bud, Thorn to your home screen so you get reminders and check-ins from friends.
-          </p>
-          <button onClick={install} className="text-[11px] underline mt-1.5"
-            style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-            {prompt ? "install" : expanded ? "hide" : "how"}
-          </button>
-        </div>
-        <button onClick={onDismiss} className="shrink-0 text-[11px] px-2"
-          style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
-          ✕
-        </button>
-      </div>
-
-      {expanded && !prompt && (
-        <div className="mt-3">
-          <InstallSteps compact />
-          <p className="text-[11px] leading-relaxed mt-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif" }}>
-            You'll sign in once more inside the app — the installed version keeps its own session.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-function NotificationPrimer({ onEnable, onSkip, status }) {
-  // Safari blocks the permission prompt outright in a browser tab.
-  const needsInstall = isIOS() && !isStandalone();
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
-
-      <div className="flex items-center justify-center gap-1 mb-6 w-full mx-auto" style={{ maxWidth: "280px" }}>
-        <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
-        <img src={WORD_IMG.bud} alt="Bud" style={{ width: "30%", height: "auto", transform: "translateY(14px) rotate(3deg)" }} />
-        <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
-      </div>
-
-      <Bell size={22} color={ENTRY_INK} style={{ marginBottom: "14px", opacity: 0.8 }} />
-
-      <p className="text-[18px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.8), fontFamily: "'Permanent Marker', cursive" }}>
-        Know when a friend checks in
-      </p>
-
-      <p className="text-[13px] leading-relaxed mb-8" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif", maxWidth: "290px" }}>
-        We'll nudge you when someone shares their rose, bud &amp; thorn with you — and give you a gentle reminder if it's been a while. Nothing else.
-      </p>
-
-      <div className="w-full" style={{ maxWidth: "300px" }}>
-        {needsInstall ? (
-          <>
-            <p className="text-[12px] leading-relaxed mb-4" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif" }}>
-              On iPhone, notifications only work once the app is on your home screen:
-            </p>
-            <InstallSteps compact />
-            <button onClick={onSkip} className="w-full mt-6 text-[11px] underline"
-              style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-              continue without notifications
-            </button>
-          </>
-        ) : (
-          <>
-            <button onClick={onEnable} className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
-              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              TURN ON NOTIFICATIONS
-            </button>
-            <button onClick={onSkip} className="w-full mt-4 text-[11px] underline"
-              style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-              not now
-            </button>
-          </>
-        )}
-      </div>
-
-      {status === "error" && !needsInstall && (
-        <p className="text-[12px] mt-5" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif", maxWidth: "290px" }}>
-          Couldn't turn them on on this device.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function Avatar({ url, name, size = 34 }) {
-  const initial = (name || "?").trim().charAt(0).toUpperCase() || "?";
-  if (url) {
-    return (
-      <img src={url} alt={name || "Profile"} style={{
-        width: size, height: size, borderRadius: "50%", objectFit: "cover",
-        border: "1px solid rgba(43,42,31,0.2)", flexShrink: 0,
-      }} />
-    );
-  }
-  return (
-    <div style={{
-      width: size, height: size, borderRadius: "50%", flexShrink: 0,
-      background: "rgba(43,42,31,0.1)", border: "1px solid rgba(43,42,31,0.12)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace",
-      fontSize: Math.round(size * 0.42),
-    }}>{initial}</div>
-  );
-}
-
-// Squares off and shrinks the picked image before upload. Phone cameras
-// produce multi-megabyte files and this only ever renders at 40px.
-async function shrinkImage(file, size = 256) {
-  const bitmap = await createImageBitmap(file);
-  const side = Math.min(bitmap.width, bitmap.height);
-  const sx = (bitmap.width - side) / 2;
-  const sy = (bitmap.height - side) / 2;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  canvas.getContext("2d").drawImage(bitmap, sx, sy, side, side, 0, 0, size, size);
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error("Couldn't process that image."))),
-      "image/jpeg",
-      0.85
-    );
-  });
-}
-
-async function uploadAvatar(userId, file) {
-  const blob = await shrinkImage(file);
-  const path = `${userId}/avatar-${Date.now()}.jpg`;
-
-  const { error: upErr } = await supabase.storage
-    .from("avatars")
-    .upload(path, blob, { contentType: "image/jpeg", upsert: true });
-  if (upErr) throw new Error(upErr.message);
-
-  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
-  const url = data.publicUrl;
-
-  const { error: dbErr } = await supabase.from("users").update({ avatar_url: url }).eq("id", userId);
-  if (dbErr) throw new Error(dbErr.message);
-
-  return url;
-}
-
-function NameStep({ initialName, onSave, saving, error }) {
-  const [name, setName] = useState(initialName || "");
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
-
-      <div className="flex items-center justify-center gap-1 mb-8 w-full mx-auto" style={{ maxWidth: "280px" }}>
-        <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
-        <img src={WORD_IMG.bud} alt="Bud" style={{ width: "30%", height: "auto", transform: "translateY(14px) rotate(3deg)" }} />
-        <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
-      </div>
-
-      <p className="text-[18px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.8), fontFamily: "'Permanent Marker', cursive" }}>
-        What should people call you?
-      </p>
-      <p className="text-[13px] leading-relaxed mb-7" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif", maxWidth: "290px" }}>
-        This is the name your friends see on every card you send.
-      </p>
-
-      <div className="w-full" style={{ maxWidth: "300px" }}>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Your name"
-          maxLength={40}
-          className="w-full px-4 py-3 rounded-full text-[14px] text-center outline-none mb-3"
-          style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
-        />
-        <button onClick={() => onSave(name.trim())} disabled={!name.trim() || saving}
-          className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
-          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-          {saving ? "SAVING…" : "CONTINUE"}
-        </button>
-      </div>
-
-      {error && <p className="text-[12px] mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
-    </div>
-  );
-}
-
-function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifStatus, onEnableNotifications }) {
-  const [name, setName] = useState(profile?.display_name || "");
-  const [savingName, setSavingName] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
-  const fileRef = useRef(null);
-  const needsInstall = isIOS() && !isStandalone();
-
-  const dirty = name.trim() !== (profile?.display_name || "") && name.trim().length > 0;
-
-  const saveName = async () => {
-    setSavingName(true);
-    setError(null);
-    const { error: err } = await supabase.from("users").update({ display_name: name.trim() }).eq("id", userId);
-    setSavingName(false);
-    if (err) { setError(err.message); return; }
-    onProfileChange({ ...profile, display_name: name.trim() });
-    setNotice("Name updated.");
-  };
-
-  const pickImage = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = "";
-    if (!file) return;
-    setUploading(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const url = await uploadAvatar(userId, file);
-      onProfileChange({ ...profile, avatar_url: url });
-      setNotice("Photo updated.");
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
-  const heading = { color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" };
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
-      <div className="w-full" style={{ maxWidth: "400px" }}>
-        <TopBar onHome={onBack} current="profile" avatarUrl={profile?.avatar_url} name={profile?.display_name} />
-
-        {/* ---------- photo + name ---------- */}
-        <div className="w-full flex flex-col items-center mb-8">
-          <button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading} className="relative mb-3">
-            <Avatar url={profile?.avatar_url} name={profile?.display_name || email} size={84} />
-            <span className="absolute bottom-0 right-0 w-7 h-7 rounded-full flex items-center justify-center"
-              style={{ background: "#2B2A1F", border: "2px solid #EFE9DA" }}>
-              <Camera size={13} color="#EFE9DA" />
-            </span>
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" onChange={pickImage} style={{ display: "none" }} />
-          <p className="text-[11px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-            {uploading ? "UPLOADING…" : "TAP TO CHANGE PHOTO"}
-          </p>
-        </div>
-
-        <p className="text-[10px] tracking-[0.2em] mb-3" style={heading}>YOUR NAME</p>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Your name"
-          maxLength={40}
-          className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2"
-          style={pill}
-        />
-        {dirty && (
-          <button onClick={saveName} disabled={savingName}
-            className="w-full px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide mb-2 disabled:opacity-50"
-            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-            {savingName ? "SAVING…" : "SAVE NAME"}
-          </button>
-        )}
-        <p className="text-[11px] leading-relaxed mb-8" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif" }}>
-          Your friends see this name and photo on every card you send.
-        </p>
-
-        {/* ---------- notifications ---------- */}
-        <p className="text-[10px] tracking-[0.2em] mb-3" style={heading}>NOTIFICATIONS</p>
-        <div className="w-full flex items-center justify-between px-4 py-3 rounded-2xl mb-2" style={pill}>
-          <div className="flex items-center gap-2">
-            <Bell size={14} color="rgba(43,42,31,0.55)" />
-            <span className="text-[13px]">Check-in alerts</span>
-          </div>
-          {notifStatus === "enabled" ? (
-            <span className="flex items-center gap-1 text-[11px]" style={{ color: "#4B5E33" }}>
-              <CheckCircle2 size={13} /> ON
-            </span>
-          ) : needsInstall ? (
-            <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-              NEEDS INSTALL
-            </span>
-          ) : (
-            <button onClick={onEnableNotifications} className="text-[11px] px-3 py-1 rounded-full"
-              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              TURN ON
-            </button>
-          )}
-        </div>
-        {needsInstall && notifStatus !== "enabled" && (
-          <div className="mt-2 mb-2">
-            <p className="text-[12px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-              iPhone only allows notifications for apps on your home screen:
-            </p>
-            <InstallSteps compact />
-          </div>
-        )}
-        {notifStatus === "error" && !needsInstall && (
-          <p className="text-[11px] leading-relaxed" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
-            Couldn't turn them on on this device.
-          </p>
-        )}
-
-        {notice && <p className="text-[11px] mt-6" style={{ color: "#4B5E33", fontFamily: "'Fraunces', serif" }}>{notice}</p>}
-        {error && <p className="text-[12px] mt-6" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
-
-        <button onClick={() => signOut()} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-full text-[12px] mt-10"
-          style={{ background: "rgba(43,42,31,0.06)", color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-          <LogOut size={13} /> SIGN OUT
-        </button>
-
-        <p className="text-center text-[10px] mt-4" style={{ color: "rgba(43,42,31,0.3)", fontFamily: "'Special Elite', monospace" }}>
-          {email}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// "Burning Man Rose, Bud, Thorn -- how was it for you?" reads like a real
-// invitation; the generic version does not say what it is about.
-function inviteMessage(title, url) {
-  return title
-    ? `${title} Rose, Bud, Thorn — how was it for you? Join me: ${url}`
-    : `How was your day? I want to hear about it — join me on Rose, Bud, Thorn: ${url}`;
-}
-
-// Builds a single SMS deep link addressed to everyone who isn't on the app yet.
-// iOS and Android disagree on the separator before `body`, hence the sniff.
-function buildSmsHref(numbers, body) {
-  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  const list = numbers.map((n) => n.replace(/[^\d+]/g, "")).join(",");
-  const sep = isIOS ? "&" : "?";
-  return `sms:${list}${sep}body=${encodeURIComponent(body)}`;
-}
-
-function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile }) {
-  const [contacts, setContacts] = useState(null);
-  const [groups, setGroups] = useState([]);
-  const [profiles, setProfiles] = useState({});
-  const [picked, setPicked] = useState([]);
-  const [showAllContacts, setShowAllContacts] = useState(false);
-  const [showAllGroups, setShowAllGroups] = useState(false);
-  const [groupName, setGroupName] = useState("");
-  const [savedGroup, setSavedGroup] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
-
-  useEffect(() => {
-    (async () => {
-      const [{ data: cs }, { data: gs }, { data: people }] = await Promise.all([
-        supabase
-          .from("contacts")
-          .select("id, name, phone, linked_user_id, last_sent_at, created_at")
-          .eq("owner_id", userId)
-          .order("last_sent_at", { ascending: false, nullsFirst: false })
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("contact_groups")
-          .select("id, name, last_sent_at, created_at, contact_group_members(contact_id)")
-          .eq("owner_id", userId)
-          .order("last_sent_at", { ascending: false, nullsFirst: false })
-          .order("created_at", { ascending: false }),
-        supabase.rpc("profiles_for_my_checkins"),
-      ]);
-      const byId = {};
-      (people || []).forEach((p) => { byId[p.id] = p; });
-      setProfiles(byId);
-      setContacts(cs || []);
-      setGroups(gs || []);
-    })();
-  }, [userId]);
-
-  const toggleContact = (id) =>
-    setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-
-  const toggleGroup = (g) => {
-    const ids = (g.contact_group_members || []).map((m) => m.contact_id);
-    const allOn = ids.length > 0 && ids.every((id) => picked.includes(id));
-    setPicked((prev) => (allOn ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]));
-  };
-
-  const groupIsOn = (g) => {
-    const ids = (g.contact_group_members || []).map((m) => m.contact_id);
-    return ids.length > 0 && ids.every((id) => picked.includes(id));
-  };
-
-  // One circle per send. Tagging it with contact_id (when it is a
-  // one-to-one send) is what lets us auto-link that contact to their
-  // account the moment they accept, so next time they get push instead.
-  const makeCircle = async (name, contactId) => {
-    const { data, error: err } = await supabase
-      .from("circles")
-      .insert({ owner_id: userId, name, contact_id: contactId || null })
-      .select()
-      .single();
-    if (err) throw new Error(err.message);
-    return data;
-  };
-
-  const send = async () => {
-    setSending(true);
-    setError(null);
-
-    try {
-      const chosen = (contacts || []).filter((c) => picked.includes(c.id));
-      const linked = chosen.filter((c) => c.linked_user_id);
-      const unlinked = chosen.filter((c) => !c.linked_user_id);
-
-      // 1. People already on the app: drop them straight into this
-      //    check-in and push them. No text, no tapping.
-      if (linked.length > 0) {
-        const { error: memberErr } = await supabase.from("group_members").insert(
-          linked.map((c) => ({
-            group_id: groupId,
-            user_id: c.linked_user_id,
-            invite_token: crypto.randomUUID(),
-            joined_at: null,
-          }))
-        );
-        if (memberErr) throw new Error(memberErr.message);
-
-        await supabase.functions
-          .invoke("send-push", { body: { group_id: groupId, sender_id: userId } })
-          .catch(() => {});
-      }
-
-      // 2. Everyone else: one pre-filled text with the invite link.
-      let smsOpened = false;
-      const withPhones = unlinked.filter((c) => c.phone);
-
-      if (withPhones.length > 0) {
-        const circle = await makeCircle(
-          withPhones.length === 1 ? withPhones[0].name : "Check-in",
-          withPhones.length === 1 ? withPhones[0].id : null
-        );
-        const url = `${window.location.origin}/invite/${circle.invite_token}?checkin=${groupId}`;
-        const body = inviteMessage(title, url);
-        window.location.href = buildSmsHref(withPhones.map((c) => c.phone), body);
-        smsOpened = true;
-      }
-
-      // Remember who this went to so the shortlist stays the useful five.
-      const now = new Date().toISOString();
-      const usedGroupIds = groups.filter(groupIsOn).map((g) => g.id);
-      await Promise.all([
-        supabase.from("contacts").update({ last_sent_at: now }).in("id", picked),
-        usedGroupIds.length > 0
-          ? supabase.from("contact_groups").update({ last_sent_at: now }).in("id", usedGroupIds)
-          : Promise.resolve(),
-      ]);
-
-      setResult({
-        pushed: linked.length,
-        texted: withPhones.length,
-        skipped: unlinked.length - withPhones.length,
-        smsOpened,
-      });
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const saveAsGroup = async () => {
-    setError(null);
-    const { data: g, error: gErr } = await supabase
-      .from("contact_groups")
-      .insert({ owner_id: userId, name: groupName.trim() })
-      .select()
-      .single();
-    if (gErr) { setError(gErr.message); return; }
-
-    const { error: mErr } = await supabase.from("contact_group_members").insert(
-      picked.map((contactId) => ({ contact_group_id: g.id, contact_id: contactId }))
-    );
-    if (mErr) { setError(mErr.message); return; }
-
-    setSavedGroup(true);
-  };
-
-  // Fallback for anyone not saved as a contact yet.
-  const shareGenericLink = async () => {
-    setError(null);
-    try {
-      const circle = await makeCircle("Check-in", null);
-      const url = `${window.location.origin}/invite/${circle.invite_token}?checkin=${groupId}`;
-      const msg = inviteMessage(title, url);
-      if (navigator.share) {
-        try { await navigator.share({ text: msg }); } catch { return; }
-        setResult({ shared: true, copied: false });
-      } else {
-        await navigator.clipboard.writeText(msg);
-        setResult({ shared: true, copied: true });
-      }
-    } catch (e) {
-      setError(e.message);
-    }
-  };
-
-  const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
-
-  // Five most recent, plus anyone currently ticked so a selection never
-  // disappears when the list is collapsed.
-  const visibleContacts = (() => {
-    if (!contacts) return [];
-    if (showAllContacts) return contacts;
-    const top = contacts.slice(0, 5);
-    const extras = contacts.filter((c) => picked.includes(c.id) && !top.includes(c));
-    return [...top, ...extras];
-  })();
-
-  // Nobody saved yet: the link is the only route, so it becomes the main action.
-  const isEmpty = contacts !== null && contacts.length === 0 && groups.length === 0;
-
-  if (result) {
-    return (
-      <div className="min-h-screen w-full flex flex-col items-center px-6 pt-8" style={{ background: "#EFE9DA" }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
-        <div className="w-full" style={{ maxWidth: "380px" }}>
-          <TopBar onHome={onHome} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
-        </div>
-        <div className="flex flex-col items-center text-center pt-6">
-        <CheckCircle2 size={26} color="#4B5E33" style={{ marginBottom: "14px" }} />
-        <h1 className="text-[20px] mb-3" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Sent</h1>
-        <div className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif", maxWidth: "300px" }}>
-          {result.shared && (
-            <p className="mb-2">
-              {result.copied
-                ? "Link copied — paste it wherever you like."
-                : "Your link is on its way."}{" "}
-              Whoever opens it gets saved to your list, so next time they're one tap.
-            </p>
-          )}
-          {result.pushed > 0 && (
-            <p className="mb-2">
-              {result.pushed} {result.pushed === 1 ? "person" : "people"} got a notification straight away.
-            </p>
-          )}
-          {result.texted > 0 && (
-            <p className="mb-2">
-              {result.texted} {result.texted === 1 ? "invite is" : "invites are"} waiting in your Messages app — hit send there to finish.
-            </p>
-          )}
-          {result.skipped > 0 && (
-            <p className="mb-2" style={{ color: "#8C2F45" }}>
-              {result.skipped} {result.skipped === 1 ? "contact has" : "contacts have"} no phone number saved, so we couldn't reach them.
-            </p>
-          )}
-        </div>
-
-        {picked.length > 1 && !savedGroup && (
-          <div className="w-full mt-8 pt-6" style={{ maxWidth: "300px", borderTop: "1px solid rgba(43,42,31,0.12)" }}>
-            <p className="text-[12px] leading-relaxed mb-3" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
-              Send to these {picked.length} often? Save them as a group.
-            </p>
-            <input
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
-              placeholder='Name it — e.g. "College Friends"'
-              maxLength={40}
-              className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-2"
-              style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
-            />
-            <button onClick={saveAsGroup} disabled={!groupName.trim()}
-              className="w-full px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
-              style={{ background: "rgba(43,42,31,0.08)", color: "rgba(43,42,31,0.7)", fontFamily: "'Special Elite', monospace" }}>
-              SAVE AS GROUP
-            </button>
-          </div>
-        )}
-
-        {savedGroup && (
-          <p className="text-[12px] mt-6" style={{ color: "#4B5E33", fontFamily: "'Fraunces', serif" }}>
-            Saved. They'll be one tap next time.
-          </p>
-        )}
-
-        {error && <p className="text-[12px] mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
-
-        <button onClick={onDone} className="mt-8 px-6 py-3 rounded-full text-[12px] font-bold tracking-wide"
-          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-          DONE
-        </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-10 pb-12" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
-      <div className="w-full" style={{ maxWidth: "380px" }}>
-        <TopBar onHome={onHome} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
-        <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>
-          {title ? `Send your ${title} cards` : "Send this check-in"}
-        </h1>
-        <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
-          {isEmpty
-            ? "Nobody to pick from yet — here's how the first one works."
-            : "Pick a group or a few people. Anyone already on the app gets a notification right away."}
-        </p>
-
-        {groups.length > 0 && (
-          <>
-            <p className="text-[10px] tracking-[0.2em] mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>GROUPS</p>
-            {(showAllGroups ? groups : groups.slice(0, 5)).map((g) => {
-              const on = groupIsOn(g);
-              return (
-                <button key={g.id} onClick={() => toggleGroup(g)}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-2xl mb-2"
-                  style={{ ...pill, background: on ? "#2B2A1F" : "#fff", color: on ? "#EFE9DA" : "#2B2A1F" }}>
-                  <span className="flex items-center gap-2 text-[13px]"><Users size={14} /> {g.name}</span>
-                  {on ? <Check size={14} /> : (
-                    <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.4)" }}>{g.contact_group_members?.length || 0}</span>
-                  )}
-                </button>
-              );
-            })}
-            {groups.length > 5 && (
-              <button onClick={() => setShowAllGroups((v) => !v)} className="text-[11px] underline mt-1"
-                style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
-                {showAllGroups ? "show fewer" : `show all ${groups.length} groups`}
-              </button>
-            )}
-            <div className="mb-6" />
-          </>
-        )}
-
-        {!isEmpty && (
-          <p className="text-[10px] tracking-[0.2em] mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>PEOPLE</p>
-        )}
-
-        {contacts === null ? (
-          <p className="text-[12px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
-        ) : contacts.length === 0 ? (
-          <p className="text-[13px] leading-relaxed mb-1" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-            Nobody's on your list yet. Send a link to whoever you want to hear from — once they open it, they're saved here and every check-in after this one is a single tap.
-          </p>
-        ) : (
-          visibleContacts.map((c) => {
-            const on = picked.includes(c.id);
-            return (
-              <button key={c.id} onClick={() => toggleContact(c.id)}
-                className="w-full flex items-center justify-between px-4 py-3 rounded-2xl mb-2"
-                style={{ ...pill, background: on ? "#2B2A1F" : "#fff", color: on ? "#EFE9DA" : "#2B2A1F" }}>
-                <span className="flex items-center gap-2.5 text-[13px]">
-                  <Avatar url={profiles[c.linked_user_id] && profiles[c.linked_user_id].avatar_url} name={c.name} size={28} />
-                  {c.name}
-                </span>
-                {on ? <Check size={14} /> : (
-                  <span className="text-[10px]" style={{ color: c.linked_user_id ? "#4B5E33" : "rgba(43,42,31,0.35)" }}>
-                    {c.linked_user_id ? "notify" : "text"}
-                  </span>
-                )}
-              </button>
-            );
-          })
-        )}
-
-        {contacts && contacts.length > 5 && (
-          <button onClick={() => setShowAllContacts((v) => !v)} className="text-[11px] underline mt-1"
-            style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
-            {showAllContacts ? "show fewer" : `show all ${contacts.length} people`}
-          </button>
-        )}
-
-        {isEmpty ? (
-          <button onClick={shareGenericLink}
-            className="w-full mt-6 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
-            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-            SHARE A LINK
-          </button>
-        ) : (
-          <>
-            <button onClick={send} disabled={picked.length === 0 || sending}
-              className="w-full mt-5 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
-              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              {sending ? "SENDING…" : picked.length === 0 ? "PICK SOMEONE" : `SEND TO ${picked.length}`}
-            </button>
-
-            <button onClick={shareGenericLink} className="w-full mt-4 text-[11px] underline"
-              style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
-              or share a one-off link with someone new
-            </button>
-          </>
-        )}
-
-        {error && <p className="text-[12px] mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
-
-        <button onClick={onDone} className="w-full mt-8 text-[11px] underline" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
-          not now — back to home
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const TYPE_LABELS = { rose: "ROSE", bud: "BUD", thorn: "THORN" };
-const TYPE_INK = { rose: "#8C2F45", bud: "#4B5E33", thorn: "#7A4A28" };
-
-// Every signed-in screen gets the same two exits, so no screen is a dead end.
-function TopBar({ onHome, onProfile, current, avatarUrl, name }) {
-  const base = {
-    fontFamily: "'Special Elite', monospace",
-    fontSize: "11px",
-    letterSpacing: "0.05em",
-  };
-
-  return (
-    <div className="w-full flex items-center justify-between mb-7">
-      <button onClick={onHome} disabled={current === "home"}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full disabled:opacity-40"
-        style={{ ...base, background: "rgba(43,42,31,0.06)", color: "rgba(43,42,31,0.6)" }}>
-        <Home size={13} /> HOME
-      </button>
-
-      <button onClick={onProfile} disabled={current === "profile"}
-        className="flex items-center gap-2 px-2 py-1 rounded-full disabled:opacity-40"
-        style={{ ...base, color: "rgba(43,42,31,0.6)" }}>
-        PROFILE
-        <Avatar url={avatarUrl} name={name} size={26} />
-      </button>
-    </div>
-  );
-}
-
-// Signed-out invite landing. Shows WHO is waiting on you, never what they
-// wrote -- card content stays behind the account.
-// Before writing: is this about today, or about a thing that happened?
-// The answer changes the invite wording and how long it stays open.
-function CheckInKind({ onStart, onHome, onProfile, profile }) {
-  const [mode, setMode] = useState(null);
-  const [title, setTitle] = useState("");
-
-  const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
-      <div className="w-full" style={{ maxWidth: "380px" }}>
-        <TopBar onHome={onHome} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
-
-        <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>
-          What's this one about?
-        </h1>
-        <p className="text-[12px] mb-7" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
-          Whoever you send it to will see the same thing, so they know what they're answering.
-        </p>
-
-        <button onClick={() => setMode("daily")}
-          className="w-full text-left px-4 py-4 rounded-2xl mb-3"
-          style={{ ...pill, background: mode === "daily" ? "#2B2A1F" : "#fff", color: mode === "daily" ? "#EFE9DA" : "#2B2A1F" }}>
-          <span className="flex items-center justify-between">
-            <span className="text-[14px]">Life</span>
-            {mode === "daily" && <Check size={15} />}
-          </span>
-          <span className="block text-[11px] mt-1" style={{ opacity: 0.6, fontFamily: "'Fraunces', serif" }}>
-            How life treating you.
-          </span>
-        </button>
-
-        <button onClick={() => setMode("event")}
-          className="w-full text-left px-4 py-4 rounded-2xl mb-3"
-          style={{ ...pill, background: mode === "event" ? "#2B2A1F" : "#fff", color: mode === "event" ? "#EFE9DA" : "#2B2A1F" }}>
-          <span className="flex items-center justify-between">
-            <span className="text-[14px]">An event</span>
-            {mode === "event" && <Check size={15} />}
-          </span>
-          <span className="block text-[11px] mt-1" style={{ opacity: 0.6, fontFamily: "'Fraunces', serif" }}>
-            A trip, a wedding, a festival — something you all went through.
-          </span>
-        </button>
-
-        {mode === "event" && (
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Name it — e.g. Burning Man"
-            maxLength={50}
-            autoFocus
-            className="w-full px-4 py-3 rounded-full text-[13px] outline-none mt-2 mb-1"
-            style={pill}
-          />
-        )}
-
-        <button
-          onClick={() => onStart(mode === "event" ? title.trim() : null)}
-          disabled={!mode || (mode === "event" && !title.trim())}
-          className="w-full mt-6 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
-          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-          START
-        </button>
-
-        {mode === "event" && (
-          <p className="text-[11px] leading-relaxed mt-4 text-center" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif" }}>
-            Event check-ins stay open for a week, so people can answer once they're home.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function InviteWelcome({ invite }) {
-  const [sender, setSender] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase.rpc("preview_invite_sender", {
-        p_invite_token: invite.circleToken,
-      });
-      if (!cancelled && data && data.length > 0) {
-        setSender({ name: data[0].sender_name, avatar: data[0].sender_avatar });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [invite]);
-
-  return (
-    <div className="w-full flex flex-col items-center text-center px-6 pt-12">
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
-      <Avatar url={sender?.avatar} name={sender?.name} size={64} />
-      <p className="text-[17px] mt-4 mb-2" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
-        {sender ? `${sender.name} shared their day with you` : "Someone shared their day with you"}
-      </p>
-      <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif", maxWidth: "290px" }}>
-        Sign in and it's the first thing you'll see.
-      </p>
-    </div>
-  );
-}
-
-// Straight after joining: read what they sent, then write yours.
-function ReceivedCheckIn({ groupId, onContinue }) {
-  const [state, setState] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data: group } = await supabase
-        .from("groups")
-        .select("id, created_by, title")
-        .eq("id", groupId)
-        .maybeSingle();
-
-      if (!group) { if (!cancelled) setState({ cards: [] }); return; }
-
-      const [{ data: cards }, { data: people }] = await Promise.all([
-        supabase
-          .from("cards")
-          .select("id, type, content, created_at")
-          .eq("group_id", groupId)
-          .eq("user_id", group.created_by)
-          .order("created_at", { ascending: true }),
-        supabase.rpc("profiles_for_my_checkins"),
-      ]);
-
-      if (cancelled) return;
-
-      const author = (people || []).find((p) => p.id === group.created_by);
-      setState({
-        cards: cards || [],
-        title: group.title,
-        name: (author && author.display_name) || "Your friend",
-        avatar: author && author.avatar_url,
-      });
-    })();
-    return () => { cancelled = true; };
-  }, [groupId]);
-
-  if (!state) {
-    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
-  }
-
-  // Nothing to read (they sent an empty check-in) -- skip straight to writing.
-  if (state.cards.length === 0) {
-    onContinue();
-    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
-  }
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-12 pb-14" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
-      <div className="w-full" style={{ maxWidth: "360px" }}>
-
-        <div className="flex flex-col items-center text-center mb-9">
-          <Avatar url={state.avatar} name={state.name} size={64} />
-          <p className="text-[17px] mt-4" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
-            {state.title ? `${state.name} on ${state.title}` : `${state.name}'s day`}
-          </p>
-        </div>
-
-        {state.cards.map((c) => (
-          <div key={c.id} className="w-full rounded-2xl px-5 py-4 mb-3"
-            style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.12)" }}>
-            <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
-              {TYPE_LABELS[c.type]}
-            </span>
-            <p className="text-[15px] leading-snug mt-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
-              {c.content}
-            </p>
-          </div>
-        ))}
-
-        <div className="mt-9 text-center">
-          <p className="text-[13px] leading-relaxed mb-5" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-            A rose is something good, a bud is something you're looking forward to, a thorn is something hard. Send {state.name} yours{state.title ? ` from ${state.title}` : ""}.
-          </p>
-          <button onClick={onContinue}
-            className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
-            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-            SHARE MINE BACK
-          </button>
-          <p className="text-[11px] mt-4" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
-            you can reply to any of these from your inbox
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CommentThread({ card, groupId, userId, profiles }) {
-  const [open, setOpen] = useState(false);
-  const [comments, setComments] = useState(null);
-  const [draft, setDraft] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [error, setError] = useState(null);
-
-  const load = async () => {
-    const { data } = await supabase
-      .from("comments")
-      .select("id, content, user_id, created_at")
-      .eq("card_id", card.id)
-      .order("created_at", { ascending: true });
-    setComments(data || []);
-  };
-
-  useEffect(() => { if (open && comments === null) load(); }, [open]);
-
-  const post = async () => {
-    const text = draft.trim();
-    if (!text) return;
-    setPosting(true);
-    setError(null);
-    const { data: inserted, error: err } = await supabase
-      .from("comments")
-      .insert({ card_id: card.id, group_id: groupId, user_id: userId, content: text })
-      .select("id")
-      .single();
-    setPosting(false);
-    if (err) { setError(err.message); return; }
-
-    // Best effort -- a failed push should never look like a failed reply.
-    supabase.functions
-      .invoke("notify-comment", { body: { comment_id: inserted.id } })
-      .catch(() => {});
-
-    setDraft("");
-    load();
-  };
-
-  const nameFor = (uid) =>
-    uid === userId ? "You" : (profiles[uid] && profiles[uid].display_name) || "Friend";
-
-  return (
-    <div className="mt-1.5">
-      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 text-[10px]"
-        style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-        <MessageCircle size={11} />
-        {open ? "HIDE" : comments && comments.length > 0 ? `${comments.length} REPLIES` : "REPLY"}
-      </button>
-
-      {open && (
-        <div className="mt-2 pl-3" style={{ borderLeft: "2px solid rgba(43,42,31,0.1)" }}>
-          {comments === null ? (
-            <p className="text-[11px]" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
-          ) : (
-            comments.map((c) => (
-              <div key={c.id} className="mb-2 flex items-start gap-2">
-                <Avatar url={profiles[c.user_id] && profiles[c.user_id].avatar_url} name={nameFor(c.user_id)} size={20} />
-                <p className="text-[12px] leading-snug" style={{ color: "rgba(43,42,31,0.8)", fontFamily: "'Fraunces', serif" }}>
-                  <span style={{ fontFamily: "'Special Elite', monospace", fontSize: "10px", color: "rgba(43,42,31,0.5)" }}>
-                    {nameFor(c.user_id)}{" "}
-                  </span>
-                  {c.content}
-                </p>
-              </div>
-            ))
-          )}
-
-          <div className="flex items-center gap-2 mt-2">
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") post(); }}
-              placeholder="Say something…"
-              maxLength={500}
-              className="flex-1 px-3 py-2 rounded-full text-[12px] outline-none"
-              style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}
-            />
-            <button onClick={post} disabled={!draft.trim() || posting}
-              className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center disabled:opacity-30"
-              style={{ background: "#2B2A1F" }}>
-              <ArrowRight size={13} color="#EFE9DA" />
-            </button>
-          </div>
-
-          {error && <p className="text-[11px] mt-1" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTab }) {
-  const [checkins, setCheckins] = useState(null);
-  const [profiles, setProfiles] = useState({});
-  const [tab, setTab] = useState(initialTab || "inbox");
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      const { data: memberships } = await supabase
-        .from("group_members")
-        .select("group_id, groups(id, created_at, expires_at, created_by, title)")
-        .eq("user_id", userId);
-
-      const groups = (memberships || [])
-        .map((m) => m.groups)
-        .filter((g) => g && new Date(g.expires_at) > new Date())
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-      const [withCards, { data: people }] = await Promise.all([
-        Promise.all(
-          groups.map(async (g) => {
-            const { data: cards } = await supabase
-              .from("cards")
-              .select("id, type, content, user_id, created_at")
-              .eq("group_id", g.id)
-              .order("created_at", { ascending: true });
-            return { ...g, cards: cards || [] };
-          })
-        ),
-        supabase.rpc("profiles_for_my_checkins"),
-      ]);
-
-      if (cancelled) return;
-
-      const byId = {};
-      (people || []).forEach((p) => { byId[p.id] = p; });
-      setProfiles(byId);
-      setCheckins(withCards.filter((g) => g.cards.length > 0));
-    })();
-
-    return () => { cancelled = true; };
-  }, [userId]);
-
-  const received = (checkins || []).filter((g) => g.created_by !== userId);
-  const sent = (checkins || []).filter((g) => g.created_by === userId);
-  const visible = tab === "inbox" ? received : sent;
-
-  // Cards arrive flat; group them by author so each person shows up once
-  // with their photo and name above their rose, bud and thorn.
-  const byAuthor = (cards) => {
-    const order = [];
-    const map = new Map();
-    for (const c of cards) {
-      if (!map.has(c.user_id)) { map.set(c.user_id, []); order.push(c.user_id); }
-      map.get(c.user_id).push(c);
-    }
-    return order.map((uid) => ({ userId: uid, cards: map.get(uid) }));
-  };
-
-  const nameFor = (uid) =>
-    uid === userId ? "You" : (profiles[uid] && profiles[uid].display_name) || "Friend";
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
-      <div className="w-full max-w-md">
-        <TopBar onHome={onBack} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
-
-        <div className="flex items-center gap-2 mb-6">
-          <button onClick={() => setTab("inbox")} className="px-4 py-2 rounded-full text-[12px] font-bold tracking-wide"
-            style={{ background: tab === "inbox" ? "#2B2A1F" : "rgba(43,42,31,0.06)", color: tab === "inbox" ? "#EFE9DA" : "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-            INBOX {received.length > 0 ? `(${received.length})` : ""}
-          </button>
-          <button onClick={() => setTab("sent")} className="px-4 py-2 rounded-full text-[12px] font-bold tracking-wide"
-            style={{ background: tab === "sent" ? "#2B2A1F" : "rgba(43,42,31,0.06)", color: tab === "sent" ? "#EFE9DA" : "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-            SENT {sent.length > 0 ? `(${sent.length})` : ""}
-          </button>
-        </div>
-
-        {checkins === null ? (
-          <p className="text-[13px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
-        ) : visible.length === 0 ? (
-          <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-            {tab === "inbox"
-              ? "Nothing here yet. When someone sends you a check-in and you both post, it'll show up here."
-              : "Nothing here yet. Check-ins you start and send to others will show up here."}
-          </p>
-        ) : (
-          visible.map((g) => (
-            <div key={g.id} className="mb-7 pb-6" style={{ borderBottom: "1px solid rgba(43,42,31,0.1)" }}>
-              <p className="text-[10px] tracking-wide mb-4" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-                {new Date(g.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                {g.title ? ` · ${g.title.toUpperCase()}` : ""}
-              </p>
-
-              {tab === "sent" && (
-                <button onClick={() => onSendMore(g)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full mb-4"
-                  style={{ background: "rgba(43,42,31,0.06)", color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace", fontSize: "10px" }}>
-                  <ArrowRight size={12} /> SEND TO SOMEONE ELSE
-                </button>
-              )}
-
-              {byAuthor(g.cards).map((author) => (
-                <div key={author.userId} className="mb-5">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Avatar
-                      url={profiles[author.userId] && profiles[author.userId].avatar_url}
-                      name={nameFor(author.userId)}
-                      size={32}
-                    />
-                    <span className="text-[12px]" style={{ color: "rgba(43,42,31,0.75)", fontFamily: "'Special Elite', monospace" }}>
-                      {nameFor(author.userId)}
-                    </span>
-                  </div>
-
-                  <div style={{ paddingLeft: "42px" }}>
-                    {author.cards.map((c, i) => (
-                      <div key={c.id || i} className="mb-3.5">
-                        <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
-                          {TYPE_LABELS[c.type]}
-                        </span>
-                        <p className="text-[13px] leading-snug" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
-                          {c.content}
-                        </p>
-                        <CommentThread card={c} groupId={g.id} userId={userId} profiles={profiles} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AuthScreen({ invite }) {
-  const [showEmail, setShowEmail] = useState(false);
-  const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const handleEmailSignIn = async (e) => {
-    e.preventDefault();
-    if (!email.trim()) return;
-    setLoading(true);
-    setError(null);
-    const { error } = await signInWithEmail(email.trim());
-    setLoading(false);
-    if (error) setError(error.message);
-    else setSent(true);
-  };
-
-  const handleGoogleSignIn = async () => {
-    setError(null);
-    const { error } = await signInWithGoogle();
-    if (error) setError(error.message);
-  };
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
-
-      <div className="flex items-center justify-center gap-1 mb-2 w-full mx-auto" style={{ maxWidth: "300px" }}>
-        <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
-        <img src={WORD_IMG.bud} alt="Bud" style={{ width: "30%", height: "auto", transform: "translateY(14px) rotate(3deg)" }} />
-        <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
-      </div>
-
-      {invite ? (
-        <div className="mb-8 -mt-2">
-          <InviteWelcome invite={invite} />
-        </div>
-      ) : (
-        <p className="text-[15px] mb-8" style={{ color: hexToRgba(ENTRY_INK, 0.7), fontFamily: "'Permanent Marker', cursive" }}>
-          Connect with a friend today
-        </p>
-      )}
-
-      {sent ? (
-        <div className="w-full text-center" style={{ maxWidth: "320px" }}>
-          <Mail size={22} color={ENTRY_INK} style={{ margin: "0 auto 12px" }} />
-          <p className="text-[14px] leading-relaxed" style={{ color: "rgba(43,42,31,0.75)", fontFamily: "'Fraunces', serif" }}>
-            Check <strong>{email}</strong> for a sign-in link.
-          </p>
-        </div>
-      ) : (
-        <div className="w-full" style={{ maxWidth: "320px" }}>
-          <button
-            onClick={handleGoogleSignIn}
-            className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
-            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}
-          >
-            CONTINUE WITH GOOGLE
-          </button>
-
-          {!showEmail ? (
-            <button
-              onClick={() => setShowEmail(true)}
-              className="w-full text-center mt-4 text-[11px] underline"
-              style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}
-            >
-              or sign in with email instead
-            </button>
-          ) : (
-            <div className="mt-4">
-              <p className="text-[11px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
-                We'll email you a one-time link — no password needed. You'll need to open your inbox and tap it to finish signing in.
-              </p>
-              <form onSubmit={handleEmailSignIn} className="w-full">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-3"
-                  style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
-                />
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
-                  style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
-                >
-                  {loading ? "SENDING…" : "SEND SIGN-IN LINK"}
-                </button>
-              </form>
-            </div>
-          )}
-
-          {error && (
-            <p className="text-[12px] text-center mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
-              {error}
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DesktopBlockScreen() {
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Permanent+Marker&display=swap');`}</style>
-      <div className="flex items-center justify-center gap-1 mb-6 w-full mx-auto" style={{ maxWidth: "300px" }}>
-        <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
-        <img src={WORD_IMG.bud} alt="Bud" style={{ width: "30%", height: "auto", transform: "translateY(14px) rotate(3deg)" }} />
-        <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
-      </div>
-      <p className="text-[16px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Permanent Marker', cursive" }}>
-        This one's meant for your phone
-      </p>
-      <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif", maxWidth: "300px" }}>
-        Rose, Bud, Thorn is built for quick daily check-ins on the go. Open this page on your phone to get started.
-      </p>
-    </div>
-  );
-}
-
-export default function App() {
-  const [session, setSession] = useState(undefined);
-  const [stage, setStage] = useState("home");
-  const [cardEntries, setCardEntries] = useState({ rose: "", bud: "", thorn: "" });
-  const [groupId, setGroupId] = useState(null);
-  const [joinedExisting, setJoinedExisting] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState(null);
-  const [joinError, setJoinError] = useState(null);
-  const [notifStatus, setNotifStatus] = useState(() =>
-    typeof Notification !== "undefined" && Notification.permission === "granted" ? "enabled" : "idle"
-  );
-  const [showPrimer, setShowPrimer] = useState(false);
-  const [profile, setProfile] = useState(undefined);
-  const [checkInTitle, setCheckInTitle] = useState(null);
-  const [inboxTab, setInboxTab] = useState("inbox");
-  const [savingName, setSavingName] = useState(false);
-  const [nameError, setNameError] = useState(null);
-
-  const [pendingInvite] = useState(() => {
-    const match = window.location.pathname.match(/^\/invite\/([^/]+)/);
-    if (!match) return null;
-    const params = new URLSearchParams(window.location.search);
-    return { circleToken: match[1], checkinGroupId: params.get("checkin") };
-  });
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
+// ---------------- Content moderation ----------------
+// Hard server-side gate — this is NOT optional. The "describe an idea" search
+// box accepts arbitrary free text from anyone, and image generation can take
+// an arbitrary uploaded photo as input, so both need to be checked BEFORE any
+// paid generation call runs. Uses OpenAI's Moderation API (a separate, cheap
+// endpoint from image generation). Blocks on sexual content categories in
+// particular — this must never be used to create nude or sexually explicit
+// images of anyone, including minors — plus the standard broader categories
+// (violence, self-harm, hate) as a general safety baseline.
+//
+// Returns { flagged: boolean, categories: string[] }. On any error reaching
+// the moderation API itself, fails CLOSED (flagged: true) — better to block
+// a legitimate request than to silently skip the safety check.
+export async function moderateContent({ text, imageBase64 } = {}) {
+  const input = [];
+  if (text) input.push({ type: 'text', text });
+  if (imageBase64) input.push({ type: 'image_url', image_url: { url: imageBase64 } });
+  if (input.length === 0) return { flagged: false, categories: [] };
+
+  try {
+    const resp = await fetch('https://api.openai.com/v1/moderations', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'omni-moderation-latest', input })
     });
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!session || !pendingInvite) return;
-
-    (async () => {
-      setStage("joining");
-      setJoinError(null);
-
-      const { data: circle, error: circleErr } = await supabase
-        .from("circles")
-        .select("id")
-        .eq("invite_token", pendingInvite.circleToken)
-        .single();
-
-      if (circleErr || !circle) {
-        setJoinError("This invite link isn't valid.");
-        return;
-      }
-
-      const { data: me } = await supabase
-        .from("users")
-        .select("display_name")
-        .eq("id", session.user.id)
-        .maybeSingle();
-      const meta = session.user.user_metadata || {};
-      const displayName =
-        (me && me.display_name) || meta.full_name || meta.name || session.user.email?.split("@")[0] || "Friend";
-
-      await supabase.from("circle_members").upsert(
-        { circle_id: circle.id, user_id: session.user.id, display_name: displayName },
-        { onConflict: "circle_id,user_id" }
-      );
-
-      // If this invite was made for a specific saved contact, bind that
-      // contact to this account. From now on the sender can notify them
-      // directly instead of texting a link.
-      await supabase
-        .rpc("connect_on_join", { p_circle_id: circle.id, p_user_id: session.user.id })
-        .catch(() => {});
-
-      if (pendingInvite.checkinGroupId) {
-        const { error: joinInsertErr } = await supabase.from("group_members").insert({
-          group_id: pendingInvite.checkinGroupId,
-          user_id: session.user.id,
-          invite_token: crypto.randomUUID(),
-          joined_at: new Date().toISOString(),
-        });
-        if (joinInsertErr) {
-          setJoinError(`Couldn't join this check-in: ${joinInsertErr.message}`);
-          return;
-        }
-      }
-
-      window.history.replaceState({}, "", "/");
-
-      if (pendingInvite.checkinGroupId) {
-        setGroupId(pendingInvite.checkinGroupId);
-        setJoinedExisting(true);
-        setCardEntries({ rose: "", bud: "", thorn: "" });
-        setStage("received");
-      } else {
-        setStage("home");
-      }
-    })();
-  }, [session, pendingInvite]);
-
-  // Load (or create) this user's profile row. Google gives us a real name
-  // for free; magic-link users have to be asked.
-  useEffect(() => {
-    if (!session) { setProfile(undefined); return; }
-    let cancelled = false;
-
-    (async () => {
-      const { data } = await supabase
-        .from("users")
-        .select("id, display_name, avatar_url")
-        .eq("id", session.user.id)
-        .maybeSingle();
-
-      if (cancelled) return;
-
-      if (data && data.display_name) { setProfile(data); return; }
-
-      const meta = session.user.user_metadata || {};
-      const fromProvider = meta.full_name || meta.name || null;
-      const avatar = (data && data.avatar_url) || meta.avatar_url || meta.picture || null;
-
-      if (fromProvider) {
-        await supabase.from("users").upsert(
-          { id: session.user.id, display_name: fromProvider, avatar_url: avatar },
-          { onConflict: "id" }
-        );
-        if (!cancelled) setProfile({ id: session.user.id, display_name: fromProvider, avatar_url: avatar });
-        return;
-      }
-
-      if (!cancelled) setProfile({ id: session.user.id, display_name: null, avatar_url: avatar });
-    })();
-
-    return () => { cancelled = true; };
-  }, [session]);
-
-  const saveDisplayName = async (value) => {
-    setSavingName(true);
-    setNameError(null);
-    const { error } = await supabase.from("users").upsert(
-      { id: session.user.id, display_name: value },
-      { onConflict: "id" }
-    );
-    setSavingName(false);
-    if (error) { setNameError(error.message); return; }
-    setProfile((p) => ({ ...(p || { id: session.user.id }), display_name: value }));
-  };
-
-  // First open after sign-in: ask about notifications once, and only once.
-  // Skipping is remembered, and the toggle always lives on the profile.
-  useEffect(() => {
-    if (!session || pendingInvite) return;
-    if (typeof Notification === "undefined") return;
-    if (Notification.permission !== "default") return;
-    let asked = null;
-    try { asked = window.localStorage.getItem(NOTIF_ASKED_KEY); } catch {}
-    if (!asked) setShowPrimer(true);
-  }, [session, pendingInvite]);
-
-  const markPrimerSeen = () => {
-    try { window.localStorage.setItem(NOTIF_ASKED_KEY, "1"); } catch {}
-  };
-
-  const filledCount = Object.values(cardEntries).filter((v) => v.trim().length > 0).length;
-
-  const handleEnableNotifications = async () => {
-    const { error } = await enablePushNotifications(session.user.id);
-    setNotifStatus(error ? "error" : "enabled");
-    return !error;
-  };
-
-  const handlePrimerEnable = async () => {
-    const ok = await handleEnableNotifications();
-    markPrimerSeen();
-    if (ok) setShowPrimer(false);
-  };
-
-  const handlePrimerSkip = () => {
-    markPrimerSeen();
-    setShowPrimer(false);
-  };
-
-  const startCheckIn = () => {
-    setSaveError(null);
-    setCardEntries({ rose: "", bud: "", thorn: "" });
-    setGroupId(null);
-    setJoinedExisting(false);
-    setCheckInTitle(null);
-    setSendOrigin("flow");
-    setStage("kind");
-  };
-
-  const [sendOrigin, setSendOrigin] = useState("flow");
-
-  // Re-open the send screen for a check-in you already posted.
-  const sendMore = (group) => {
-    setGroupId(group.id);
-    setCheckInTitle(group.title || null);
-    setSendOrigin("inbox");
-    setStage("send");
-  };
-
-  const beginWithKind = (title) => {
-    setCheckInTitle(title);
-    setStage("cards");
-  };
-
-  const finishCheckIn = async () => {
-    setSaving(true);
-    setSaveError(null);
-
-    let targetGroupId = groupId;
-
-    if (!targetGroupId) {
-      // Events stay open a week -- people answer once they are home,
-      // not the same night. Everyday check-ins keep the 24h default.
-      const insert = { created_by: session.user.id };
-      if (checkInTitle) {
-        insert.title = checkInTitle;
-        insert.expires_at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-      }
-
-      const { data: group, error: groupErr } = await supabase
-        .from("groups")
-        .insert(insert)
-        .select()
-        .single();
-
-      if (groupErr) {
-        setSaving(false);
-        setSaveError(groupErr.message);
-        return;
-      }
-
-      await supabase.from("group_members").insert({
-        group_id: group.id,
-        user_id: session.user.id,
-        invite_token: group.id,
-        joined_at: new Date().toISOString(),
-      });
-
-      targetGroupId = group.id;
+    if (!resp.ok) {
+      console.error('Moderation API request failed:', await resp.text());
+      return { flagged: true, categories: ['moderation_check_failed'] };
     }
+    const json = await resp.json();
+    const result = json.results?.[0];
+    if (!result) return { flagged: true, categories: ['moderation_check_failed'] };
+    const categories = Object.entries(result.categories || {}).filter(([, v]) => v).map(([k]) => k);
+    return { flagged: !!result.flagged, categories };
+  } catch (err) {
+    console.error('Moderation check error:', err);
+    return { flagged: true, categories: ['moderation_check_failed'] };
+  }
+}
 
-    const rows = Object.entries(cardEntries)
-      .filter(([, value]) => value.trim().length > 0)
-      .map(([type, content]) => ({
-        group_id: targetGroupId,
-        user_id: session.user.id,
-        type,
-        content,
-      }));
+// Ideas that work better as a bust (head/shoulders/chest) than a full standing
+// figure — sidesteps the headroom-cropping problem entirely since there's no
+// tall hat-plus-full-body composition to fit, and matches how these are often
+// actually carved in practice. Add more slugs here as needed.
+const BUST_IDEAS = new Set(['cowboy', 'cowgirl']);
 
-    const { error: cardsError } = await supabase.from("cards").insert(rows);
+// Ideas that are plain OBJECTS, not a person/animal figure — a "full body,
+// standing pose" instruction makes no sense for these (there's no body to
+// stand), and was actually causing the AI to invent a whole person just to
+// have something to put the object on (e.g. "cowboy hat" turning into a full
+// cowboy wearing a hat). These get a completely separate, figure-free prompt.
+const OBJECT_IDEAS = new Set(['sunflower', 'guitar', 'cowboy-hat', 'cowboy-boot', 'skull', 'cactus', 'wooden-spoon']);
 
-    if (cardsError) {
-      setSaving(false);
-      setSaveError(cardsError.message);
-      return;
+// Chip carving patterns are flat, 2D designs meant for a flat wooden panel —
+// not a full-body figure and not really a 3D object either. Front-facing
+// only really applies; LEFT/RIGHT for these will just be the AI's best
+// guess at an edge-on view of a flat panel, which is a real but minor and
+// low-cost limitation of reusing the same pipeline as the 3D-figure presets.
+const CHIP_CARVING_IDEAS = new Set([
+  'geometric-rosette-chip-carving-pattern',
+  'diamond-border-chip-carving-pattern',
+  'deer-in-forest-chip-carving-landscape',
+  'wolf-howling-at-moon-chip-carving-scene',
+  'eagle-over-mountains-chip-carving-landscape'
+]);
+
+// Applied to every template-generation prompt (front/left/right — anything
+// that gets traced and printed, NOT the photorealistic "how this looks
+// carved" reference photo, which should show real wood color). Without this,
+// the model has free rein and some ideas come back in full color (e.g. a red
+// Santa suit) while others stay black-and-white, which looks inconsistent
+// across the preset gallery.
+const BW_LINE_ART_INSTRUCTION = `BLACK AND WHITE LINE ART ONLY — pure black outlines on a `
+  + `plain white background, like a coloring-book page or a stencil. NO color of any kind `
+  + `anywhere (no red, no brown, no skin tones, nothing) and no shading, gradients, or fill `
+  + `patterns — just clean black linework, since this is a trace-ready template, not a `
+  + `finished illustration. NO text, words, letters, numbers, labels, titles, signage, or `
+  + `typography of ANY kind anywhere in the image — a purely visual design only. This applies `
+  + `even if the subject is a named place, park, person, or brand (do not write out its name `
+  + `anywhere in the image, the way a travel poster or product label might) — depict only the `
+  + `visual scene or subject itself, never its name as text, unless the description explicitly `
+  + `and specifically asks for lettering to be included.`;
+
+export function buildPrompt(idea, options = {}) {
+  const slug = ideaSlug(idea);
+  const lower = idea.toLowerCase();
+  // Respect an explicit composition word the person actually typed, not just
+  // the hardcoded preset lists below — someone typing "a bust of a hippo"
+  // should get a bust, not have that instruction silently overridden by the
+  // default full-body framing.
+  const isBust = BUST_IDEAS.has(slug) || /\b(bust|portrait|head\s*and\s*shoulders|close[\s-]?up)\b/.test(lower);
+  const isObject = OBJECT_IDEAS.has(slug);
+  const isChipCarving = CHIP_CARVING_IDEAS.has(slug);
+  // Explicit "this is a 2D pattern" flag from the person (search box or
+  // upload checkbox) — a broader, less stylistically-specific version of
+  // the chip-carving preset treatment: any flat design, not necessarily
+  // triangular-faceted chip-carving style specifically.
+  const isFlat2D = !!options.is2D && !isChipCarving;
+
+  if (isChipCarving) {
+    return `A traditional CHIP CARVING pattern design, viewed flat and straight-on, for exactly this: `
+      + `${idea}. Chip carving is a woodworking technique using a knife to remove small triangular `
+      + `chips of wood, so the design should read as a network of clean, bold triangular/faceted `
+      + `shapes and crisp geometric or angular lines — sharp straight-edged facets and cut lines, `
+      + `NOT curved, painterly, or softly shaded. If it's a geometric pattern (a rosette, a border), `
+      + `make it cleanly symmetrical and evenly spaced. If it's a pictorial scene (an animal, a `
+      + `landscape), stylize it into simplified, angular, faceted shapes typical of chip-carved `
+      + `folk-art plaques, not a realistic illustration. Centered, filling most of the frame with a `
+      + `small even margin on all sides. ${BW_LINE_ART_INSTRUCTION} No shadows, no other objects, `
+      + `suitable for a woodcarving template.`;
+  }
+
+  if (isFlat2D) {
+    return `A flat, 2D relief-carving pattern design, viewed straight-on from directly above/in `
+      + `front (NOT a 3D figure, NOT a standing pose, NOT viewed from an angle) — for exactly this: `
+      + `${idea}. This is meant to be carved into a single flat wooden surface (a plaque, panel, or `
+      + `board), so depict it the way a flat decorative pattern or silhouette would actually look on `
+      + `a flat surface — clean, well-defined shapes and outlines rather than a photorealistic or `
+      + `three-dimensional rendering. Centered, filling most of the frame with a small even margin `
+      + `on all sides. ${BW_LINE_ART_INSTRUCTION} No shadows, no other objects, suitable for a `
+      + `woodcarving template.`;
+  }
+
+  if (isBust) {
+    return `A close-up BUST PORTRAIT — head, shoulders, and upper chest ONLY, nothing below that — `
+      + `of exactly this: ${idea}. Depict that subject accurately and specifically; do not substitute `
+      + `a different, more common, or more generic animal or character, even if it would be simpler `
+      + `to draw. Cropped with a flat, straight horizontal line at the bottom, like a real carved bust `
+      + `on a stand — not an angled line following the shoulders. Facing forward, centered, with `
+      + `clear empty white margin on all sides (including above any hat, so it doesn't touch the top `
+      + `edge). ${BW_LINE_ART_INSTRUCTION} No shadows, no other objects, suitable for a woodcarving `
+      + `template.`;
+  }
+
+  if (isObject) {
+    return `A simple, clear illustration of just ${idea} — the object itself ONLY, by itself, `
+      + `like a clean product photo or catalog illustration. Depict that exact object accurately; `
+      + `do not substitute a different, more generic object. Do NOT include a person, a body, `
+      + `hands, arms, or any figure wearing, holding, or using it — just the standalone object, `
+      + `centered, viewed from whichever angle shows its shape most clearly (usually a simple `
+      + `side or three-quarter view of the object itself). Leave clear empty white margin on `
+      + `all four sides so nothing touches the edges. ${BW_LINE_ART_INSTRUCTION} No shadows, `
+      + `no other objects, suitable for a woodcarving template.`;
+  }
+
+  return `A full-body illustration of exactly this: ${idea}. Depict that subject accurately and `
+    + `specifically — the exact species/animal/character named, with any exact accessories `
+    + `mentioned like hats or clothing; do not substitute a different, more common, or more `
+    + `generic subject, even if it would be simpler to draw. CRITICAL: do NOT add clothing, `
+    + `human posture, standing-upright stance, facial expressions, or any other anthropomorphic/`
+    + `humanizing elements that weren't explicitly asked for — render the subject in its own `
+    + `natural, anatomically correct pose (a fish swims, a bird perches or flies, a snake `
+    + `slithers, a four-legged animal stands on four legs, etc.), not forced into a human-like `
+    + `upright pose unless the subject is normally bipedal (a person, a bear rearing up, etc.) `
+    + `or the description explicitly asks for that. Viewed from directly in front — a true `
+    + `forward-facing view, facing the camera, centered, in whatever natural pose suits this `
+    + `specific subject. `
+    + `CRITICAL — HEADROOM: if the subject has a hat, tall ears, antlers, horns, fins, or any `
+    + `feature above/beyond its main body, that is the outermost point and is the single most `
+    + `common thing that gets cropped — treat it as the true edge of the subject for framing `
+    + `purposes and make sure there is clearly visible empty white space beyond it. Draw the `
+    + `subject noticeably SMALLER than you initially plan, leaving roughly 15% empty margin on `
+    + `every side (top, bottom, left, right) — the whole subject, every extremity included, must `
+    + `sit fully inside that margin with room to spare, never touching or crossing any edge of `
+    + `the image. ${BW_LINE_ART_INSTRUCTION} No shadows, no other objects, suitable for a `
+    + `woodcarving template.`;
+}
+
+export async function generateAndCleanIdea(idea, options = {}) {
+  const slug = ideaSlug(idea);
+
+  if (supabase) {
+    const { data: cached } = await supabase.from('generated_designs').select('image_path').eq('idea_slug', slug).maybeSingle();
+    if (cached?.image_path) {
+      const { data: publicUrlData } = supabase.storage.from('designs').getPublicUrl(cached.image_path);
+      const cachedResp = await fetch(publicUrlData.publicUrl);
+      if (cachedResp.ok) return { buffer: Buffer.from(await cachedResp.arrayBuffer()), fromCache: true };
     }
-
-    const { data: userRow } = await supabase
-      .from("users")
-      .select("fill_count")
-      .eq("id", session.user.id)
-      .single();
-
-    await supabase
-      .from("users")
-      .update({ fill_count: (userRow?.fill_count ?? 0) + 1 })
-      .eq("id", session.user.id);
-
-    supabase.functions
-      .invoke("send-push", { body: { group_id: targetGroupId, sender_id: session.user.id } })
-      .catch(() => {});
-
-    setGroupId(targetGroupId);
-    setSaving(false);
-    setStage(joinedExisting ? "home" : "send");
-  };
-
-  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  if (!isMobile) {
-    return <DesktopBlockScreen />;
   }
 
-  if (session === undefined) {
-    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
+  const genResp = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'gpt-image-1', prompt: buildPrompt(idea.trim(), options), size: '1024x1536', n: 1 })
+  });
+  if (!genResp.ok) throw new Error(`OpenAI generation failed: ${await genResp.text()}`);
+  const genJson = await genResp.json();
+  const b64 = genJson.data?.[0]?.b64_json;
+  if (!b64) throw new Error('No image returned from generation API.');
+  const imageBuffer = Buffer.from(b64, 'base64');
+
+  // remove.bg is an AI subject-detector — it's trained to find a person,
+  // animal, or product, and reliably confuses itself on abstract geometric
+  // patterns (which have no "subject" to isolate). For those, skip it
+  // entirely and keep the plain-white-background image as-is; the
+  // client-side flood-fill trace (the same one already used for raw photo
+  // uploads) handles a clean white background far more reliably than an
+  // AI subject-detector guessing at a pattern that isn't a "thing."
+  const isFlat2D = CHIP_CARVING_IDEAS.has(slug) || !!options.is2D;
+  if (isFlat2D) {
+    return { buffer: imageBuffer, fromCache: false };
   }
 
-  if (!session) {
-    return <AuthScreen invite={pendingInvite} />;
+  const cleanedBuffer = await removeBackground(imageBuffer);
+  return { buffer: cleanedBuffer, fromCache: false };
+}
+
+// Shared remove.bg call — used for AI-generated ideas (above) and for raw
+// user-uploaded photos (see /api/remove-background in server.js), so an
+// uploaded photo with a busy real-world background gets the same real
+// background removal presets already get, instead of relying only on the
+// client-side flood-fill approximation.
+export async function removeBackground(imageBuffer) {
+  const form = new FormData();
+  form.append('image_file', new Blob([imageBuffer], { type: 'image/png' }), 'source.png');
+  form.append('size', 'auto');
+  const rmResp = await fetch('https://api.remove.bg/v1.0/removebg', {
+    method: 'POST', headers: { 'X-Api-Key': REMOVEBG_API_KEY }, body: form
+  });
+  if (!rmResp.ok) throw new Error(`remove.bg failed: ${await rmResp.text()}`);
+  return Buffer.from(await rmResp.arrayBuffer());
+}
+
+export async function storeDesign(idea, buffer, { isPreset = false, sortOrder = null } = {}) {
+  if (!supabase) return { success: false, error: 'Supabase not configured' };
+  const slug = ideaSlug(idea);
+  const path = `${slug}.png`;
+  const { error: uploadErr } = await supabase.storage.from('designs').upload(path, buffer, { contentType: 'image/png', upsert: true });
+  if (uploadErr) { console.error('Supabase upload error:', uploadErr); return { success: false, error: uploadErr.message || String(uploadErr) }; }
+  const { error: dbErr } = await supabase.from('generated_designs').upsert({
+    idea_slug: slug, idea_text: idea.trim(), image_path: path,
+    is_preset: isPreset, sort_order: sortOrder
+  });
+  if (dbErr) { console.error('Supabase DB upsert error:', dbErr); return { success: false, error: dbErr.message || String(dbErr) }; }
+  return { success: true };
+}
+
+// ---------------- Reference photo: "what this looks like carved" ----------------
+// Pure inspiration, shown next to a selected preset — NOT part of the print
+// template. Just ONE realistic photo, not multiple angles (multiple angles
+// belong to the actual print templates below, not this preview).
+//
+// IMPORTANT: generated FROM the actual template artwork (image-to-image edit),
+// not from a blind text prompt — so the carving keeps the same silhouette,
+// pose and proportions as what the person is actually tracing.
+function buildReferencePrompt(idea, options = {}) {
+  const slug = ideaSlug(idea);
+  const isBust = BUST_IDEAS.has(slug);
+  const is2D = CHIP_CARVING_IDEAS.has(slug) || !!options.is2D;
+  const guideMarkInstruction = isBust
+    ? ` Since this is a portrait/bust, lightly sketch a few faint pencil-style guide marks directly `
+      + `on the wood showing where the key features should be carved — a light centerline down the `
+      + `middle of the face, and small guide marks at the eyes, nose, and mouth. These should look `
+      + `like a carver's actual layout marks (thin, faint pencil lines), not part of the finished `
+      + `carving itself.`
+    : '';
+  const subjectName = idea && idea.trim() ? idea.trim() : null;
+  const openingLine = subjectName
+    ? `The subject of this image is: ${subjectName}. Keep it EXACTLY that specific subject throughout — `
+      + `do not swap it for a different, more common, or more generic animal or character just because `
+      + `it might be easier or more familiar to render (for example, if the subject is a hippo, it must `
+      + `stay recognizably a hippo — short legs, a wide barrel-shaped body, a broad flat snout — NOT a `
+      + `bear or generic mammal shape). `
+    : `Do not substitute a different, more common, or more generic subject than what's actually shown `
+      + `in the reference image. `;
+  const closingReminder = subjectName
+    ? ` Before finishing, double-check: does this still clearly read as ${subjectName}, matching the `
+      + `distinctive shape and features from the reference image, and not a generic substitute?`
+    : '';
+
+  if (is2D) {
+    return `${openingLine}Reimagine that exact subject/pattern from this image as a real, flat, `
+      + `hand-carved wooden relief panel or plaque — the design carved INTO a single flat board, `
+      + `NOT a freestanding 3D sculpture or figure. Plain, unstained natural wood grain, visible `
+      + `hand-tool carving marks and clean cut facets (a skilled hobbyist's style — NOT machine-`
+      + `perfect, NOT professionally polished). Photographed straight-on or from a gentle angle `
+      + `that still clearly shows the whole flat panel, soft natural lighting. Realistic photo, `
+      + `no text, no watermark, no background clutter.${closingReminder}`;
   }
 
-  if (stage === "joining") {
-    return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&display=swap');`}</style>
-        {joinError ? (
-          <>
-            <p className="text-[14px] mb-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{joinError}</p>
-            <button onClick={() => { window.history.replaceState({}, "", "/"); setStage("home"); }} className="text-[12px] underline" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
-              Go to home
-            </button>
-          </>
-        ) : (
-          <p className="text-[14px]" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>Joining…</p>
-        )}
-      </div>
-    );
-  }
+  return `${openingLine}Reimagine that exact subject from this image as a simple, hand-carved wooden `
+    + `sculpture — keep the exact same silhouette, pose, proportions, and species/identity as the `
+    + `reference image, just rendered in carved wood instead of a flat illustration. Plain, unstained `
+    + `natural wood grain, visible hand-tool carving marks and facets (a beginner whittler's simple, `
+    + `slightly rough style — NOT smooth, NOT intricately detailed, NOT professionally polished).`
+    + `${guideMarkInstruction} Sitting on a plain wooden workbench, soft natural lighting, photographed `
+    + `from a flattering three-quarter angle that shows the piece clearly. Realistic photo, no text, `
+    + `no watermark, no background clutter.${closingReminder}`;
+}
 
-  if (profile === undefined) {
-    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
-  }
+// Calls OpenAI's image-edit endpoint with the actual template artwork as input,
+// so the result matches its silhouette instead of being invented from scratch.
+// Exported for live use (uploads/search-generated ideas), in addition to the
+// preset seeding pipeline below.
+export async function generateReferenceImage(baseImageBuffer, idea, options = {}) {
+  const form = new FormData();
+  form.append('model', 'gpt-image-1');
+  form.append('image', new Blob([baseImageBuffer], { type: 'image/png' }), 'template.png');
+  form.append('prompt', buildReferencePrompt(idea, options));
+  form.append('size', '1024x1536');
+  form.append('n', '1');
 
-  if (!profile.display_name) {
-    return <NameStep onSave={saveDisplayName} saving={savingName} error={nameError} />;
-  }
+  const genResp = await fetch('https://api.openai.com/v1/images/edits', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+    body: form
+  });
+  if (!genResp.ok) throw new Error(`OpenAI edit failed: ${await genResp.text()}`);
+  const genJson = await genResp.json();
+  const b64 = genJson.data?.[0]?.b64_json;
+  if (!b64) throw new Error('No image returned from edit API.');
+  return Buffer.from(b64, 'base64');
+}
 
-  if (showPrimer) {
-    return <NotificationPrimer onEnable={handlePrimerEnable} onSkip={handlePrimerSkip} status={notifStatus} />;
-  }
+// Generates + stores the single reference photo for one idea, skipping if it
+// already exists. Returns { success, skipped, error }.
+export async function generateAndStoreReferenceImage(idea) {
+  if (!supabase) return { success: false, error: 'Supabase not configured' };
+  const slug = ideaSlug(idea);
 
-  if (stage === "inbox") {
-    return (
-      <InboxScreen
-        userId={session.user.id}
-        profile={profile}
-        initialTab={inboxTab}
-        onBack={() => setStage("home")}
-        onProfile={() => setStage("profile")}
-        onSendMore={sendMore}
-      />
-    );
-  }
+  const { data: existing } = await supabase
+    .from('generated_designs')
+    .select('image_path, reference_image_path')
+    .eq('idea_slug', slug)
+    .maybeSingle();
 
-  if (stage === "profile") {
-    return (
-      <ProfileScreen
-        userId={session.user.id}
-        email={session.user.email}
-        profile={profile}
-        onProfileChange={setProfile}
-        onBack={() => setStage("home")}
-        notifStatus={notifStatus}
-        onEnableNotifications={handleEnableNotifications}
-      />
-    );
+  if (!existing?.image_path) {
+    return { success: false, error: 'No template artwork found for this idea yet — run the preset seed first.' };
   }
+  if (existing.reference_image_path) return { success: true, skipped: true };
 
-  if (stage === "kind") {
-    return (
-      <CheckInKind
-        onStart={beginWithKind}
-        onHome={() => setStage("home")}
-        onProfile={() => setStage("profile")}
-        profile={profile}
-      />
-    );
+  const { data: publicUrlData } = supabase.storage.from('designs').getPublicUrl(existing.image_path);
+  const baseResp = await fetch(publicUrlData.publicUrl);
+  if (!baseResp.ok) return { success: false, error: 'Could not download the template artwork to use as a reference.' };
+  const baseImageBuffer = Buffer.from(await baseResp.arrayBuffer());
+
+  try {
+    const buffer = await generateReferenceImage(baseImageBuffer, idea);
+    const path = `${slug}-reference.png`;
+    const { error: uploadErr } = await supabase.storage.from('designs').upload(path, buffer, { contentType: 'image/png', upsert: true });
+    if (uploadErr) return { success: false, error: uploadErr.message || String(uploadErr) };
+    const { error: dbErr } = await supabase.from('generated_designs').update({ reference_image_path: path }).eq('idea_slug', slug);
+    if (dbErr) return { success: false, error: `DB update failed: ${dbErr.message || dbErr}` };
+    return { success: true, skipped: false };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
+}
 
-  if (stage === "received") {
-    return <ReceivedCheckIn groupId={groupId} onContinue={() => setStage("cards")} />;
+// ---------------- Template views: RIGHT and TOP ----------------
+// Both are genuinely different artwork from the main (side-profile) template —
+// not mirrors, not guesses — generated via image-edit using the actual
+// template/uploaded artwork as input, so the subject and style stay
+// consistent while the model is free to show real asymmetry (a curled trunk,
+// a turned head, an asymmetric marking) that a mirror would miss. Output is
+// trace-ready (plain background, no shading) like the main template, NOT the
+// realistic "how this looks carved" reference photo above.
+export function buildRightViewPrompt(idea) {
+  const subjectLine = idea && idea.trim()
+    ? `The subject of this image is: ${idea.trim()}. Keep it EXACTLY that specific subject — do not `
+      + `substitute a different, more common, or more generic subject just because it might be `
+      + `easier to render. If that description mentions any specific clothing, accessories, or `
+      + `props (a tie, hat, glasses, jewelry, collar, etc.), those must be clearly visible in THIS `
+      + `view too — do not drop or omit them just because the angle changed. If it describes an `
+      + `action or pose (swimming, running, flying, sitting, jumping, etc.), that exact same `
+      + `action/pose must carry over too — do not revert to a generic standing pose. `
+    : '';
+  return `${subjectLine}Reimagine that exact subject from this image as if the camera walked 90 `
+    + `degrees around it to the subject's right side — a true right-side profile view, as if you `
+    + `turned the subject (or walked around it) a quarter-turn from this front-facing view. Keep the `
+    + `same pose/action and body orientation as the front image — only the camera angle changes, `
+    + `not what the subject is doing. This is a genuinely different angle showing the side of the `
+    + `subject, which may reveal real details or asymmetry not visible from the front (a curled `
+    + `tail, a turned head, an asymmetric marking, etc.) — don't just reuse or mirror this image, `
+    + `actually depict how that side would genuinely look from a 90-degree turn. Keep the exact `
+    + `same subject, style, and proportions. The subject must be clearly and fully drawn — do NOT `
+    + `leave it mostly blank, faint, or barely sketched. CRITICAL: leave generous empty margin on `
+    + `all four sides — the entire subject must be fully visible with clear space around it and NOT `
+    + `touching or extending past any edge of the image; scale it down if needed. `
+    + `${BW_LINE_ART_INSTRUCTION} No watermark, no other objects.`;
+}
+
+export function buildLeftViewPrompt(idea) {
+  const subjectLine = idea && idea.trim()
+    ? `The subject of this image is: ${idea.trim()}. Keep it EXACTLY that specific subject — do not `
+      + `substitute a different, more common, or more generic subject just because it might be `
+      + `easier to render. If that description mentions any specific clothing, accessories, or `
+      + `props (a tie, hat, glasses, jewelry, collar, etc.), those must be clearly visible in THIS `
+      + `view too — do not drop or omit them just because the angle changed. If it describes an `
+      + `action or pose (swimming, running, flying, sitting, jumping, etc.), that exact same `
+      + `action/pose must carry over too — do not revert to a generic standing pose. `
+    : '';
+  return `${subjectLine}Reimagine that exact subject from this image as if the camera walked 90 `
+    + `degrees around it to the subject's left side — a true left-side profile view, as if you `
+    + `turned the subject (or walked around it) a quarter-turn from this front-facing view, in the `
+    + `opposite direction from a right-side turn. Keep the same pose/action and body orientation as `
+    + `the front image — only the camera angle changes, not what the subject is doing. This is a `
+    + `genuinely different angle showing the side of the subject, which may reveal real details or `
+    + `asymmetry not visible from the front (a curled tail, a turned head, an asymmetric marking, `
+    + `etc.) — don't just reuse or mirror this image, actually depict how that side would genuinely `
+    + `look from a 90-degree turn. Keep the exact same subject, style, and proportions. The subject `
+    + `must be clearly and fully drawn — do NOT leave it mostly blank, faint, or barely sketched. `
+    + `CRITICAL: leave generous empty margin on all four sides — the entire subject must be fully `
+    + `visible with clear space around it and NOT touching or extending past any edge of the image; `
+    + `scale it down if needed. ${BW_LINE_ART_INSTRUCTION} No watermark, no other objects.`;
+}
+
+export function buildBackViewPrompt(idea) {
+  const subjectLine = idea && idea.trim()
+    ? `The subject of this image is: ${idea.trim()}. Keep it EXACTLY that specific subject — do not `
+      + `substitute a different, more common, or more generic subject just because it might be `
+      + `easier to render. If that description mentions any specific clothing, accessories, or `
+      + `props (a tie, hat, glasses, jewelry, collar, etc.), those must still clearly be that same `
+      + `item as seen from behind (a hat's back/brim, a tie's knot from behind, a backpack strap, `
+      + `etc.) — do not drop them just because the angle changed. If it describes an action or pose `
+      + `(swimming, running, flying, sitting, jumping, etc.), that exact same action/pose must carry `
+      + `over too — do not revert to a generic standing pose. `
+    : '';
+  return `${subjectLine}Reimagine that exact subject from this image as if the camera walked all the `
+    + `way around it — a full 180-degree turn from this front-facing view — to look at it directly `
+    + `from BEHIND. This is the BACK of the subject: the back of the head (NOT the face), the back `
+    + `of the torso/body, the back of any clothing or accessories, and so on. Do NOT show the face `
+    + `or any front-facing details, and do NOT simply reuse, flip, or mirror this front image — `
+    + `actually depict how the back genuinely looks, including real details that would only be `
+    + `visible from behind (the back of a hat or collar, a tail, the back of hair, a belt or strap `
+    + `crossing the back, etc.). Keep the same pose/stance and body orientation as the front image — `
+    + `only the camera angle changes, not what the subject is doing. Keep the exact same subject, `
+    + `style, and proportions. The subject must be clearly and fully drawn — do NOT leave it mostly `
+    + `blank, faint, or barely sketched. CRITICAL: leave generous empty margin on all four sides — `
+    + `the entire subject must be fully visible with clear space around it and NOT touching or `
+    + `extending past any edge of the image; scale it down if needed. `
+    + `${BW_LINE_ART_INSTRUCTION} No watermark, no other objects.`;
+}
+
+export function buildTopViewPrompt() {
+  return `Reimagine ONLY the subject from this image, redrawn as a genuine TOP-DOWN / BIRD'S-EYE `
+    + `VIEW — imagine a camera positioned directly above the subject, pointing straight down at the `
+    + `crown of its head (or the top of its back, for an animal), looking down its full length from `
+    + `head/front to feet/tail. This is NOT a side view, NOT a three-quarter view, and NOT the same `
+    + `image rotated — it is a completely different silhouette, as if you are floating above the `
+    + `subject looking down: you should mainly see the top of the head or hat (as a rounded shape, `
+    + `an oval or circle), the shoulders and top of the back, and little to no face, front torso, or `
+    + `side profile, because a true overhead view hides those. For a standing human/animal figure, `
+    + `the limbs will appear foreshortened or barely visible, tucked close to the outline, since `
+    + `they are pointing away from the camera, not out to the sides. Think of it like a floor plan `
+    + `or an aerial photo, not a portrait. Keep the same subject and general proportions as the `
+    + `reference image, but the silhouette shape itself must be clearly different from a side profile. `
+    + `CRITICAL: leave generous empty margin on all four sides — the entire subject must be fully `
+    + `visible with clear space around it and NOT touching or extending past any edge of the image; `
+    + `scale it down if needed. ${BW_LINE_ART_INSTRUCTION} No watermark, no other objects.`;
+}
+
+// "Describe an edit" — a person's own free-text instruction applied to their
+// currently loaded design. Deliberately narrow: change ONLY what they asked
+// for, preserve everything else exactly, so a small request ("make the ears
+// bigger") doesn't turn into the model re-imagining the whole piece.
+export function buildTweakPrompt(instruction) {
+  return `Make ONLY this specific change to the image, and nothing else: ${instruction}. `
+    + `Keep everything else about the image EXACTLY the same as it already is — same subject, `
+    + `same species/identity, same pose, same style, same proportions, same composition, same `
+    + `framing. Do not re-imagine, restyle, or redesign the piece; make the smallest edit that `
+    + `satisfies the request. ${BW_LINE_ART_INSTRUCTION} No watermark, no other objects, no cropping.`;
+}
+
+// Shared primitive: OpenAI image-edit + remove.bg cleanup, given any base
+// image and prompt. Used for both RIGHT and TOP, for both presets (batch,
+// cached) and live uploads/search-generated ideas (on-demand, uncached).
+export async function generateEditedTemplateView(baseImageBuffer, prompt) {
+  const form = new FormData();
+  form.append('model', 'gpt-image-1');
+  form.append('image', new Blob([baseImageBuffer], { type: 'image/png' }), 'source.png');
+  form.append('prompt', prompt);
+  form.append('size', '1024x1536');
+  form.append('n', '1');
+
+  const genResp = await fetch('https://api.openai.com/v1/images/edits', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+    body: form
+  });
+  if (!genResp.ok) throw new Error(`OpenAI edit failed: ${await genResp.text()}`);
+  const genJson = await genResp.json();
+  const b64 = genJson.data?.[0]?.b64_json;
+  if (!b64) throw new Error('No image returned from edit API.');
+  const imageBuffer = Buffer.from(b64, 'base64');
+
+  const form2 = new FormData();
+  form2.append('image_file', new Blob([imageBuffer], { type: 'image/png' }), 'edited.png');
+  form2.append('size', 'auto');
+  const rmResp = await fetch('https://api.remove.bg/v1.0/removebg', {
+    method: 'POST', headers: { 'X-Api-Key': REMOVEBG_API_KEY }, body: form2
+  });
+  if (!rmResp.ok) throw new Error(`remove.bg failed: ${await rmResp.text()}`);
+  return Buffer.from(await rmResp.arrayBuffer());
+}
+
+// ---------- Preset (batch, cached) versions ----------
+async function generateAndStoreTemplateView(idea, viewName, prompt) {
+  if (!supabase) return { success: false, error: 'Supabase not configured' };
+  const slug = ideaSlug(idea);
+  const col = `${viewName}_view_path`;
+
+  const { data: existing } = await supabase
+    .from('generated_designs')
+    .select(`image_path, ${col}`)
+    .eq('idea_slug', slug)
+    .maybeSingle();
+
+  if (!existing?.image_path) {
+    return { success: false, error: 'No template artwork found for this idea yet — run the preset seed first.' };
   }
+  if (existing[col]) return { success: true, skipped: true };
 
-  if (stage === "cards") {
-    return (
-      <IntroCarousel
-        entries={cardEntries}
-        setEntries={setCardEntries}
-        onBegin={finishCheckIn}
-        title={checkInTitle}
-        onGoHome={() => setStage("home")}
-        onProfile={() => setStage("profile")}
-        profile={profile}
-        saving={saving}
-        saveError={saveError}
-        joinedExisting={joinedExisting}
-      />
-    );
+  const { data: publicUrlData } = supabase.storage.from('designs').getPublicUrl(existing.image_path);
+  const baseResp = await fetch(publicUrlData.publicUrl);
+  if (!baseResp.ok) return { success: false, error: 'Could not download the template artwork to use as a base image.' };
+  const baseImageBuffer = Buffer.from(await baseResp.arrayBuffer());
+
+  try {
+    const buffer = await generateEditedTemplateView(baseImageBuffer, prompt);
+    const path = `${slug}-${viewName}.png`;
+    const { error: uploadErr } = await supabase.storage.from('designs').upload(path, buffer, { contentType: 'image/png', upsert: true });
+    if (uploadErr) return { success: false, error: uploadErr.message || String(uploadErr) };
+    const { error: dbErr } = await supabase.from('generated_designs').update({ [col]: path }).eq('idea_slug', slug);
+    if (dbErr) return { success: false, error: `DB update failed: ${dbErr.message || dbErr}` };
+    return { success: true, skipped: false };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
+}
 
-  if (stage === "send") {
-    return (
-      <SendScreen
-        userId={session.user.id}
-        groupId={groupId}
-        profile={profile}
-        title={checkInTitle}
-        onDone={() => {
-          if (sendOrigin === "inbox") { setInboxTab("sent"); setStage("inbox"); }
-          else setStage("home");
-        }}
-        onHome={() => setStage("home")}
-        onProfile={() => setStage("profile")}
-      />
-    );
-  }
-
-  return (
-    <DeskHome
-      filledCount={filledCount}
-      waitingCount={0}
-      readCount={0}
-      profile={profile}
-      onOpenCards={startCheckIn}
-      onOpenInbox={() => setStage("inbox")}
-      onOpenProfile={() => setStage("profile")}
-      saveError={saveError}
-    />
-  );
+export async function generateAndStoreRightView(idea) {
+  return generateAndStoreTemplateView(idea, 'right', buildRightViewPrompt());
+}
+export async function generateAndStoreLeftView(idea) {
+  return generateAndStoreTemplateView(idea, 'left', buildLeftViewPrompt());
+}
+export async function generateAndStoreBackView(idea) {
+  return generateAndStoreTemplateView(idea, 'back', buildBackViewPrompt());
+}
+export async function generateAndStoreTopView(idea) {
+  return generateAndStoreTemplateView(idea, 'top', buildTopViewPrompt());
 }
