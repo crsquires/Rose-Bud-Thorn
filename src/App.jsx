@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Trash2, User, Bell, Plus, Check, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Trash2, User, Bell, Check, Users, Camera } from "lucide-react";
 import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
 import { STAMP_IMG, WORD_IMG } from "./assets";
 
@@ -410,76 +410,145 @@ function NotificationPrimer({ onEnable, onSkip, status }) {
   );
 }
 
-function ProfileScreen({ userId, email, onBack, notifStatus, onEnableNotifications }) {
-  const [contacts, setContacts] = useState(null);
-  const [groups, setGroups] = useState(null);
-  const [error, setError] = useState(null);
-
-  const [addingContact, setAddingContact] = useState(false);
-  const [cName, setCName] = useState("");
-  const [cPhone, setCPhone] = useState("");
-
-  const [addingGroup, setAddingGroup] = useState(false);
-  const [gName, setGName] = useState("");
-  const [gPicked, setGPicked] = useState([]);
-
-  const load = async () => {
-    const [{ data: cs }, { data: gs }] = await Promise.all([
-      supabase.from("contacts").select("id, name, phone, linked_user_id").eq("owner_id", userId).order("name"),
-      supabase.from("contact_groups").select("id, name, contact_group_members(contact_id)").eq("owner_id", userId).order("name"),
-    ]);
-    setContacts(cs || []);
-    setGroups(gs || []);
-  };
-
-  useEffect(() => { load(); }, [userId]);
-
-  const saveContact = async () => {
-    if (!cName.trim()) return;
-    setError(null);
-    const { error: err } = await supabase.from("contacts").insert({
-      owner_id: userId,
-      name: cName.trim(),
-      phone: cPhone.trim() || null,
-    });
-    if (err) { setError(err.message); return; }
-    setCName(""); setCPhone(""); setAddingContact(false);
-    load();
-  };
-
-  const removeContact = async (c) => {
-    if (!window.confirm(`Remove ${c.name}?`)) return;
-    await supabase.from("contacts").delete().eq("id", c.id);
-    load();
-  };
-
-  const saveGroup = async () => {
-    if (!gName.trim() || gPicked.length === 0) return;
-    setError(null);
-    const { data: g, error: err } = await supabase
-      .from("contact_groups")
-      .insert({ owner_id: userId, name: gName.trim() })
-      .select()
-      .single();
-    if (err) { setError(err.message); return; }
-
-    const { error: memberErr } = await supabase.from("contact_group_members").insert(
-      gPicked.map((contactId) => ({ contact_group_id: g.id, contact_id: contactId }))
+function Avatar({ url, name, size = 34 }) {
+  const initial = (name || "?").trim().charAt(0).toUpperCase() || "?";
+  if (url) {
+    return (
+      <img src={url} alt={name || "Profile"} style={{
+        width: size, height: size, borderRadius: "50%", objectFit: "cover",
+        border: "1px solid rgba(43,42,31,0.2)", flexShrink: 0,
+      }} />
     );
-    if (memberErr) { setError(memberErr.message); return; }
+  }
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: "50%", flexShrink: 0,
+      background: "rgba(43,42,31,0.1)", border: "1px solid rgba(43,42,31,0.12)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace",
+      fontSize: Math.round(size * 0.42),
+    }}>{initial}</div>
+  );
+}
 
-    setGName(""); setGPicked([]); setAddingGroup(false);
-    load();
+// Squares off and shrinks the picked image before upload. Phone cameras
+// produce multi-megabyte files and this only ever renders at 40px.
+async function shrinkImage(file, size = 256) {
+  const bitmap = await createImageBitmap(file);
+  const side = Math.min(bitmap.width, bitmap.height);
+  const sx = (bitmap.width - side) / 2;
+  const sy = (bitmap.height - side) / 2;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  canvas.getContext("2d").drawImage(bitmap, sx, sy, side, side, 0, 0, size, size);
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("Couldn't process that image."))),
+      "image/jpeg",
+      0.85
+    );
+  });
+}
+
+async function uploadAvatar(userId, file) {
+  const blob = await shrinkImage(file);
+  const path = `${userId}/avatar-${Date.now()}.jpg`;
+
+  const { error: upErr } = await supabase.storage
+    .from("avatars")
+    .upload(path, blob, { contentType: "image/jpeg", upsert: true });
+  if (upErr) throw new Error(upErr.message);
+
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  const url = data.publicUrl;
+
+  const { error: dbErr } = await supabase.from("users").update({ avatar_url: url }).eq("id", userId);
+  if (dbErr) throw new Error(dbErr.message);
+
+  return url;
+}
+
+function NameStep({ initialName, onSave, saving, error }) {
+  const [name, setName] = useState(initialName || "");
+
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
+
+      <div className="flex items-center justify-center gap-1 mb-8 w-full mx-auto" style={{ maxWidth: "280px" }}>
+        <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
+        <img src={WORD_IMG.bud} alt="Bud" style={{ width: "30%", height: "auto", transform: "translateY(14px) rotate(3deg)" }} />
+        <img src={WORD_IMG.thorn} alt="Thorn" style={{ width: "30%", height: "auto", transform: "rotate(7deg)" }} />
+      </div>
+
+      <p className="text-[18px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.8), fontFamily: "'Permanent Marker', cursive" }}>
+        What should people call you?
+      </p>
+      <p className="text-[13px] leading-relaxed mb-7" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif", maxWidth: "290px" }}>
+        This is the name your friends see on every card you send.
+      </p>
+
+      <div className="w-full" style={{ maxWidth: "300px" }}>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Your name"
+          maxLength={40}
+          className="w-full px-4 py-3 rounded-full text-[14px] text-center outline-none mb-3"
+          style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+        />
+        <button onClick={() => onSave(name.trim())} disabled={!name.trim() || saving}
+          className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
+          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+          {saving ? "SAVING…" : "CONTINUE"}
+        </button>
+      </div>
+
+      {error && <p className="text-[12px] mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
+    </div>
+  );
+}
+
+function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifStatus, onEnableNotifications }) {
+  const [name, setName] = useState(profile?.display_name || "");
+  const [savingName, setSavingName] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const fileRef = useRef(null);
+
+  const dirty = name.trim() !== (profile?.display_name || "") && name.trim().length > 0;
+
+  const saveName = async () => {
+    setSavingName(true);
+    setError(null);
+    const { error: err } = await supabase.from("users").update({ display_name: name.trim() }).eq("id", userId);
+    setSavingName(false);
+    if (err) { setError(err.message); return; }
+    onProfileChange({ ...profile, display_name: name.trim() });
+    setNotice("Name updated.");
   };
 
-  const removeGroup = async (g) => {
-    if (!window.confirm(`Remove "${g.name}"?`)) return;
-    await supabase.from("contact_groups").delete().eq("id", g.id);
-    load();
+  const pickImage = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const url = await uploadAvatar(userId, file);
+      onProfileChange({ ...profile, avatar_url: url });
+      setNotice("Photo updated.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
   };
-
-  const togglePick = (id) =>
-    setGPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
   const heading = { color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" };
@@ -488,12 +557,44 @@ function ProfileScreen({ userId, email, onBack, notifStatus, onEnableNotificatio
     <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
       <div className="w-full" style={{ maxWidth: "400px" }}>
-        <button onClick={onBack} className="flex items-center gap-1 text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+        <button onClick={onBack} className="flex items-center gap-1 text-[12px] mb-8" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
           <ChevronLeft size={14} /> BACK TO HOME
         </button>
 
-        <h1 className="text-[22px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Profile</h1>
-        <p className="text-[12px] mb-8" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>{email}</p>
+        {/* ---------- photo + name ---------- */}
+        <div className="w-full flex flex-col items-center mb-8">
+          <button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading} className="relative mb-3">
+            <Avatar url={profile?.avatar_url} name={profile?.display_name || email} size={84} />
+            <span className="absolute bottom-0 right-0 w-7 h-7 rounded-full flex items-center justify-center"
+              style={{ background: "#2B2A1F", border: "2px solid #EFE9DA" }}>
+              <Camera size={13} color="#EFE9DA" />
+            </span>
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" onChange={pickImage} style={{ display: "none" }} />
+          <p className="text-[11px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+            {uploading ? "UPLOADING…" : "TAP TO CHANGE PHOTO"}
+          </p>
+        </div>
+
+        <p className="text-[10px] tracking-[0.2em] mb-3" style={heading}>YOUR NAME</p>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Your name"
+          maxLength={40}
+          className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2"
+          style={pill}
+        />
+        {dirty && (
+          <button onClick={saveName} disabled={savingName}
+            className="w-full px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide mb-2 disabled:opacity-50"
+            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+            {savingName ? "SAVING…" : "SAVE NAME"}
+          </button>
+        )}
+        <p className="text-[11px] leading-relaxed mb-8" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif" }}>
+          Your friends see this name and photo on every card you send.
+        </p>
 
         {/* ---------- notifications ---------- */}
         <p className="text-[10px] tracking-[0.2em] mb-3" style={heading}>NOTIFICATIONS</p>
@@ -514,114 +615,22 @@ function ProfileScreen({ userId, email, onBack, notifStatus, onEnableNotificatio
           )}
         </div>
         {notifStatus === "error" && (
-          <p className="text-[11px] leading-relaxed mb-6" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
+          <p className="text-[11px] leading-relaxed" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
             Couldn't turn them on here. On iPhone, add the app to your home screen first, then try again.
           </p>
         )}
-        <div className="mb-8" />
 
-        {/* ---------- contacts ---------- */}
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-[10px] tracking-[0.2em]" style={heading}>CONTACTS</p>
-          <button onClick={() => setAddingContact((v) => !v)} className="flex items-center gap-1 text-[11px]" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-            <Plus size={13} /> ADD
-          </button>
-        </div>
+        {notice && <p className="text-[11px] mt-6" style={{ color: "#4B5E33", fontFamily: "'Fraunces', serif" }}>{notice}</p>}
+        {error && <p className="text-[12px] mt-6" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
 
-        {addingContact && (
-          <div className="mb-4">
-            <input value={cName} onChange={(e) => setCName(e.target.value)} placeholder="Name"
-              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2" style={pill} />
-            <input value={cPhone} onChange={(e) => setCPhone(e.target.value)} placeholder="Phone number" type="tel"
-              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2" style={pill} />
-            <button onClick={saveContact} className="w-full px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide"
-              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              SAVE CONTACT
-            </button>
-          </div>
-        )}
-
-        {contacts === null ? (
-          <p className="text-[12px] mb-8" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
-        ) : contacts.length === 0 ? (
-          <p className="text-[12px] mb-8 leading-relaxed" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>
-            No contacts yet. Add someone and you can send them a check-in in one tap.
-          </p>
-        ) : (
-          <div className="mb-8">
-            {contacts.map((c) => (
-              <div key={c.id} className="w-full flex items-center gap-2 mb-2">
-                <div className="flex-1 flex items-center justify-between px-4 py-3 rounded-2xl" style={pill}>
-                  <span className="text-[13px]">{c.name}</span>
-                  <span className="text-[10px]" style={{ color: c.linked_user_id ? "#4B5E33" : "rgba(43,42,31,0.4)" }}>
-                    {c.linked_user_id ? "ON THE APP" : (c.phone || "no number")}
-                  </span>
-                </div>
-                <button onClick={() => removeContact(c)} className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(140,47,69,0.08)" }}>
-                  <Trash2 size={14} color="#8C2F45" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ---------- groups ---------- */}
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-[10px] tracking-[0.2em]" style={heading}>GROUPS</p>
-          <button onClick={() => setAddingGroup((v) => !v)} disabled={!contacts || contacts.length === 0}
-            className="flex items-center gap-1 text-[11px] disabled:opacity-30" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-            <Plus size={13} /> NEW
-          </button>
-        </div>
-
-        {addingGroup && (
-          <div className="mb-4">
-            <input value={gName} onChange={(e) => setGName(e.target.value)} placeholder='Group name — e.g. "College Friends"'
-              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-3" style={pill} />
-            <p className="text-[11px] mb-2" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Who's in it?</p>
-            {(contacts || []).map((c) => {
-              const on = gPicked.includes(c.id);
-              return (
-                <button key={c.id} onClick={() => togglePick(c.id)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl mb-2"
-                  style={{ ...pill, background: on ? "#2B2A1F" : "#fff", color: on ? "#EFE9DA" : "#2B2A1F" }}>
-                  <span className="text-[13px]">{c.name}</span>
-                  {on && <Check size={14} />}
-                </button>
-              );
-            })}
-            <button onClick={saveGroup} disabled={!gName.trim() || gPicked.length === 0}
-              className="w-full mt-2 px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
-              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              SAVE GROUP
-            </button>
-          </div>
-        )}
-
-        {groups && groups.length > 0 && (
-          <div className="mb-8">
-            {groups.map((g) => (
-              <div key={g.id} className="w-full flex items-center gap-2 mb-2">
-                <div className="flex-1 flex items-center justify-between px-4 py-3 rounded-2xl" style={pill}>
-                  <span className="text-[13px]">{g.name}</span>
-                  <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.4)" }}>
-                    {g.contact_group_members?.length || 0} people
-                  </span>
-                </div>
-                <button onClick={() => removeGroup(g)} className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(140,47,69,0.08)" }}>
-                  <Trash2 size={14} color="#8C2F45" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {error && <p className="text-[12px] mb-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
-
-        <button onClick={() => signOut()} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-full text-[12px] mt-4"
+        <button onClick={() => signOut()} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-full text-[12px] mt-10"
           style={{ background: "rgba(43,42,31,0.06)", color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
           <LogOut size={13} /> SIGN OUT
         </button>
+
+        <p className="text-center text-[10px] mt-4" style={{ color: "rgba(43,42,31,0.3)", fontFamily: "'Special Elite', monospace" }}>
+          {email}
+        </p>
       </div>
     </div>
   );
@@ -639,17 +648,24 @@ function buildSmsHref(numbers, body) {
 function SendScreen({ userId, groupId, onDone }) {
   const [contacts, setContacts] = useState(null);
   const [groups, setGroups] = useState([]);
+  const [profiles, setProfiles] = useState({});
   const [picked, setPicked] = useState([]);
+  const [groupName, setGroupName] = useState("");
+  const [savedGroup, setSavedGroup] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const [{ data: cs }, { data: gs }] = await Promise.all([
+      const [{ data: cs }, { data: gs }, { data: people }] = await Promise.all([
         supabase.from("contacts").select("id, name, phone, linked_user_id").eq("owner_id", userId).order("name"),
         supabase.from("contact_groups").select("id, name, contact_group_members(contact_id)").eq("owner_id", userId).order("name"),
+        supabase.rpc("profiles_for_my_checkins"),
       ]);
+      const byId = {};
+      (people || []).forEach((p) => { byId[p.id] = p; });
+      setProfiles(byId);
       setContacts(cs || []);
       setGroups(gs || []);
     })();
@@ -737,6 +753,23 @@ function SendScreen({ userId, groupId, onDone }) {
     }
   };
 
+  const saveAsGroup = async () => {
+    setError(null);
+    const { data: g, error: gErr } = await supabase
+      .from("contact_groups")
+      .insert({ owner_id: userId, name: groupName.trim() })
+      .select()
+      .single();
+    if (gErr) { setError(gErr.message); return; }
+
+    const { error: mErr } = await supabase.from("contact_group_members").insert(
+      picked.map((contactId) => ({ contact_group_id: g.id, contact_id: contactId }))
+    );
+    if (mErr) { setError(mErr.message); return; }
+
+    setSavedGroup(true);
+  };
+
   // Fallback for anyone not saved as a contact yet.
   const shareGenericLink = async () => {
     setError(null);
@@ -780,6 +813,36 @@ function SendScreen({ userId, groupId, onDone }) {
             </p>
           )}
         </div>
+
+        {picked.length > 1 && !savedGroup && (
+          <div className="w-full mt-8 pt-6" style={{ maxWidth: "300px", borderTop: "1px solid rgba(43,42,31,0.12)" }}>
+            <p className="text-[12px] leading-relaxed mb-3" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
+              Send to these {picked.length} often? Save them as a group.
+            </p>
+            <input
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              placeholder='Name it — e.g. "College Friends"'
+              maxLength={40}
+              className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-2"
+              style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+            />
+            <button onClick={saveAsGroup} disabled={!groupName.trim()}
+              className="w-full px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
+              style={{ background: "rgba(43,42,31,0.08)", color: "rgba(43,42,31,0.7)", fontFamily: "'Special Elite', monospace" }}>
+              SAVE AS GROUP
+            </button>
+          </div>
+        )}
+
+        {savedGroup && (
+          <p className="text-[12px] mt-6" style={{ color: "#4B5E33", fontFamily: "'Fraunces', serif" }}>
+            Saved. They'll be one tap next time.
+          </p>
+        )}
+
+        {error && <p className="text-[12px] mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
+
         <button onClick={onDone} className="mt-8 px-6 py-3 rounded-full text-[12px] font-bold tracking-wide"
           style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
           DONE
@@ -832,7 +895,10 @@ function SendScreen({ userId, groupId, onDone }) {
               <button key={c.id} onClick={() => toggleContact(c.id)}
                 className="w-full flex items-center justify-between px-4 py-3 rounded-2xl mb-2"
                 style={{ ...pill, background: on ? "#2B2A1F" : "#fff", color: on ? "#EFE9DA" : "#2B2A1F" }}>
-                <span className="text-[13px]">{c.name}</span>
+                <span className="flex items-center gap-2.5 text-[13px]">
+                  <Avatar url={profiles[c.linked_user_id] && profiles[c.linked_user_id].avatar_url} name={c.name} size={28} />
+                  {c.name}
+                </span>
                 {on ? <Check size={14} /> : (
                   <span className="text-[10px]" style={{ color: c.linked_user_id ? "#4B5E33" : "rgba(43,42,31,0.35)" }}>
                     {c.linked_user_id ? "notify" : "text"}
@@ -867,6 +933,7 @@ const TYPE_INK = { rose: "#8C2F45", bud: "#4B5E33", thorn: "#7A4A28" };
 
 function InboxScreen({ userId, onBack }) {
   const [checkins, setCheckins] = useState(null);
+  const [profiles, setProfiles] = useState({});
   const [tab, setTab] = useState("inbox");
 
   useEffect(() => {
@@ -883,18 +950,26 @@ function InboxScreen({ userId, onBack }) {
         .filter((g) => g && new Date(g.expires_at) > new Date())
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-      const withCards = await Promise.all(
-        groups.map(async (g) => {
-          const { data: cards } = await supabase
-            .from("cards")
-            .select("type, content, user_id, created_at")
-            .eq("group_id", g.id)
-            .order("created_at", { ascending: true });
-          return { ...g, cards: cards || [] };
-        })
-      );
+      const [withCards, { data: people }] = await Promise.all([
+        Promise.all(
+          groups.map(async (g) => {
+            const { data: cards } = await supabase
+              .from("cards")
+              .select("type, content, user_id, created_at")
+              .eq("group_id", g.id)
+              .order("created_at", { ascending: true });
+            return { ...g, cards: cards || [] };
+          })
+        ),
+        supabase.rpc("profiles_for_my_checkins"),
+      ]);
 
-      if (!cancelled) setCheckins(withCards.filter((g) => g.cards.length > 0));
+      if (cancelled) return;
+
+      const byId = {};
+      (people || []).forEach((p) => { byId[p.id] = p; });
+      setProfiles(byId);
+      setCheckins(withCards.filter((g) => g.cards.length > 0));
     })();
 
     return () => { cancelled = true; };
@@ -904,8 +979,23 @@ function InboxScreen({ userId, onBack }) {
   const sent = (checkins || []).filter((g) => g.created_by === userId);
   const visible = tab === "inbox" ? received : sent;
 
+  // Cards arrive flat; group them by author so each person shows up once
+  // with their photo and name above their rose, bud and thorn.
+  const byAuthor = (cards) => {
+    const order = [];
+    const map = new Map();
+    for (const c of cards) {
+      if (!map.has(c.user_id)) { map.set(c.user_id, []); order.push(c.user_id); }
+      map.get(c.user_id).push(c);
+    }
+    return order.map((uid) => ({ userId: uid, cards: map.get(uid) }));
+  };
+
+  const nameFor = (uid) =>
+    uid === userId ? "You" : (profiles[uid] && profiles[uid].display_name) || "Friend";
+
   return (
-    <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8" style={{ background: "#EFE9DA" }}>
+    <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
       <div className="w-full max-w-md">
         <button onClick={onBack} className="flex items-center gap-1 text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
@@ -933,26 +1023,38 @@ function InboxScreen({ userId, onBack }) {
           </p>
         ) : (
           visible.map((g) => (
-            <div key={g.id} className="mb-6 pb-6" style={{ borderBottom: "1px solid rgba(43,42,31,0.1)" }}>
-              <p className="text-[10px] tracking-wide mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+            <div key={g.id} className="mb-7 pb-6" style={{ borderBottom: "1px solid rgba(43,42,31,0.1)" }}>
+              <p className="text-[10px] tracking-wide mb-4" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
                 {new Date(g.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
               </p>
-              {g.cards.length === 0 ? (
-                <p className="text-[12px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif", fontStyle: "italic" }}>
-                  No answers posted yet.
-                </p>
-              ) : (
-                g.cards.map((c, i) => (
-                  <div key={i} className="mb-3">
-                    <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
-                      {TYPE_LABELS[c.type]} {c.user_id === userId ? "(You)" : ""}
+
+              {byAuthor(g.cards).map((author) => (
+                <div key={author.userId} className="mb-5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Avatar
+                      url={profiles[author.userId] && profiles[author.userId].avatar_url}
+                      name={nameFor(author.userId)}
+                      size={32}
+                    />
+                    <span className="text-[12px]" style={{ color: "rgba(43,42,31,0.75)", fontFamily: "'Special Elite', monospace" }}>
+                      {nameFor(author.userId)}
                     </span>
-                    <p className="text-[13px] leading-snug" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
-                      {c.content}
-                    </p>
                   </div>
-                ))
-              )}
+
+                  <div style={{ paddingLeft: "42px" }}>
+                    {author.cards.map((c, i) => (
+                      <div key={i} className="mb-2.5">
+                        <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
+                          {TYPE_LABELS[c.type]}
+                        </span>
+                        <p className="text-[13px] leading-snug" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
+                          {c.content}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           ))
         )}
@@ -1093,6 +1195,9 @@ export default function App() {
     typeof Notification !== "undefined" && Notification.permission === "granted" ? "enabled" : "idle"
   );
   const [showPrimer, setShowPrimer] = useState(false);
+  const [profile, setProfile] = useState(undefined);
+  const [savingName, setSavingName] = useState(false);
+  const [nameError, setNameError] = useState(null);
 
   const [pendingInvite] = useState(() => {
     const match = window.location.pathname.match(/^\/invite\/([^/]+)/);
@@ -1127,7 +1232,14 @@ export default function App() {
         return;
       }
 
-      const displayName = session.user.email?.split("@")[0] || "Friend";
+      const { data: me } = await supabase
+        .from("users")
+        .select("display_name")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      const meta = session.user.user_metadata || {};
+      const displayName =
+        (me && me.display_name) || meta.full_name || meta.name || session.user.email?.split("@")[0] || "Friend";
 
       await supabase.from("circle_members").upsert(
         { circle_id: circle.id, user_id: session.user.id, display_name: displayName },
@@ -1138,7 +1250,7 @@ export default function App() {
       // contact to this account. From now on the sender can notify them
       // directly instead of texting a link.
       await supabase
-        .rpc("link_contact_on_join", { p_circle_id: circle.id, p_user_id: session.user.id })
+        .rpc("connect_on_join", { p_circle_id: circle.id, p_user_id: session.user.id })
         .catch(() => {});
 
       if (pendingInvite.checkinGroupId) {
@@ -1166,6 +1278,54 @@ export default function App() {
       }
     })();
   }, [session, pendingInvite]);
+
+  // Load (or create) this user's profile row. Google gives us a real name
+  // for free; magic-link users have to be asked.
+  useEffect(() => {
+    if (!session) { setProfile(undefined); return; }
+    let cancelled = false;
+
+    (async () => {
+      const { data } = await supabase
+        .from("users")
+        .select("id, display_name, avatar_url")
+        .eq("id", session.user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (data && data.display_name) { setProfile(data); return; }
+
+      const meta = session.user.user_metadata || {};
+      const fromProvider = meta.full_name || meta.name || null;
+      const avatar = (data && data.avatar_url) || meta.avatar_url || meta.picture || null;
+
+      if (fromProvider) {
+        await supabase.from("users").upsert(
+          { id: session.user.id, display_name: fromProvider, avatar_url: avatar },
+          { onConflict: "id" }
+        );
+        if (!cancelled) setProfile({ id: session.user.id, display_name: fromProvider, avatar_url: avatar });
+        return;
+      }
+
+      if (!cancelled) setProfile({ id: session.user.id, display_name: null, avatar_url: avatar });
+    })();
+
+    return () => { cancelled = true; };
+  }, [session]);
+
+  const saveDisplayName = async (value) => {
+    setSavingName(true);
+    setNameError(null);
+    const { error } = await supabase.from("users").upsert(
+      { id: session.user.id, display_name: value },
+      { onConflict: "id" }
+    );
+    setSavingName(false);
+    if (error) { setNameError(error.message); return; }
+    setProfile((p) => ({ ...(p || { id: session.user.id }), display_name: value }));
+  };
 
   // First open after sign-in: ask about notifications once, and only once.
   // Skipping is remembered, and the toggle always lives on the profile.
@@ -1306,6 +1466,14 @@ export default function App() {
     );
   }
 
+  if (profile === undefined) {
+    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
+  }
+
+  if (!profile.display_name) {
+    return <NameStep onSave={saveDisplayName} saving={savingName} error={nameError} />;
+  }
+
   if (showPrimer) {
     return <NotificationPrimer onEnable={handlePrimerEnable} onSkip={handlePrimerSkip} status={notifStatus} />;
   }
@@ -1319,6 +1487,8 @@ export default function App() {
       <ProfileScreen
         userId={session.user.id}
         email={session.user.email}
+        profile={profile}
+        onProfileChange={setProfile}
         onBack={() => setStage("home")}
         notifStatus={notifStatus}
         onEnableNotifications={handleEnableNotifications}
