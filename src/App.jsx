@@ -778,10 +778,11 @@ function SendScreen({ userId, groupId, onDone }) {
       const url = `${window.location.origin}/invite/${circle.invite_token}?checkin=${groupId}`;
       const msg = `How was your day? I want to hear about it — join me on Rose, Bud, Thorn: ${url}`;
       if (navigator.share) {
-        try { await navigator.share({ text: msg }); } catch {}
+        try { await navigator.share({ text: msg }); } catch { return; }
+        setResult({ shared: true, copied: false });
       } else {
         await navigator.clipboard.writeText(msg);
-        alert("Link copied — paste it anywhere to send.");
+        setResult({ shared: true, copied: true });
       }
     } catch (e) {
       setError(e.message);
@@ -790,6 +791,9 @@ function SendScreen({ userId, groupId, onDone }) {
 
   const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
 
+  // Nobody saved yet: the link is the only route, so it becomes the main action.
+  const isEmpty = contacts !== null && contacts.length === 0 && groups.length === 0;
+
   if (result) {
     return (
       <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
@@ -797,6 +801,14 @@ function SendScreen({ userId, groupId, onDone }) {
         <CheckCircle2 size={26} color="#4B5E33" style={{ marginBottom: "14px" }} />
         <h1 className="text-[20px] mb-3" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Sent</h1>
         <div className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif", maxWidth: "300px" }}>
+          {result.shared && (
+            <p className="mb-2">
+              {result.copied
+                ? "Link copied — paste it wherever you like."
+                : "Your link is on its way."}{" "}
+              Whoever opens it gets saved to your list, so next time they're one tap.
+            </p>
+          )}
           {result.pushed > 0 && (
             <p className="mb-2">
               {result.pushed} {result.pushed === 1 ? "person" : "people"} got a notification straight away.
@@ -857,7 +869,9 @@ function SendScreen({ userId, groupId, onDone }) {
       <div className="w-full" style={{ maxWidth: "380px" }}>
         <h1 className="text-[20px] mb-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Send this check-in</h1>
         <p className="text-[12px] mb-6" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif" }}>
-          Pick a group or a few people. Anyone already on the app gets a notification right away.
+          {isEmpty
+            ? "Nobody to pick from yet — here's how the first one works."
+            : "Pick a group or a few people. Anyone already on the app gets a notification right away."}
         </p>
 
         {groups.length > 0 && (
@@ -880,13 +894,15 @@ function SendScreen({ userId, groupId, onDone }) {
           </>
         )}
 
-        <p className="text-[10px] tracking-[0.2em] mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>PEOPLE</p>
+        {!isEmpty && (
+          <p className="text-[10px] tracking-[0.2em] mb-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>PEOPLE</p>
+        )}
 
         {contacts === null ? (
           <p className="text-[12px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
         ) : contacts.length === 0 ? (
-          <p className="text-[12px] leading-relaxed mb-4" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
-            No saved contacts yet. Add some on your profile, or share a one-off link below.
+          <p className="text-[13px] leading-relaxed mb-1" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
+            Nobody's on your list yet. Send a link to whoever you want to hear from — once they open it, they're saved here and every check-in after this one is a single tap.
           </p>
         ) : (
           contacts.map((c) => {
@@ -909,20 +925,32 @@ function SendScreen({ userId, groupId, onDone }) {
           })
         )}
 
-        <button onClick={send} disabled={picked.length === 0 || sending}
-          className="w-full mt-5 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
-          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-          {sending ? "SENDING…" : picked.length === 0 ? "SEND" : `SEND TO ${picked.length}`}
-        </button>
+        {isEmpty ? (
+          <button onClick={shareGenericLink}
+            className="w-full mt-6 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+            SHARE A LINK
+          </button>
+        ) : (
+          <>
+            <button onClick={send} disabled={picked.length === 0 || sending}
+              className="w-full mt-5 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+              {sending ? "SENDING…" : picked.length === 0 ? "PICK SOMEONE" : `SEND TO ${picked.length}`}
+            </button>
 
-        <button onClick={shareGenericLink} className="w-full mt-4 text-[11px] underline"
-          style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
-          or share a one-off link
-        </button>
+            <button onClick={shareGenericLink} className="w-full mt-4 text-[11px] underline"
+              style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
+              or share a one-off link with someone new
+            </button>
+          </>
+        )}
 
         {error && <p className="text-[12px] mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
 
-        <button onClick={onDone} className="w-full mt-6 text-[11px] underline" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>skip for now</button>
+        <button onClick={onDone} className="w-full mt-8 text-[11px] underline" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
+          not now — back to home
+        </button>
       </div>
     </div>
   );
