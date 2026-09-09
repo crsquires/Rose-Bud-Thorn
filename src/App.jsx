@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Trash2, User, Bell, Check, Users, Camera } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Trash2, User, Bell, Check, Users, Camera, MessageCircle } from "lucide-react";
 import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
 import { STAMP_IMG, WORD_IMG } from "./assets";
 
@@ -959,6 +959,173 @@ function SendScreen({ userId, groupId, onDone }) {
 const TYPE_LABELS = { rose: "ROSE", bud: "BUD", thorn: "THORN" };
 const TYPE_INK = { rose: "#8C2F45", bud: "#4B5E33", thorn: "#7A4A28" };
 
+function InvitePreview({ invite, onContinue }) {
+  const [state, setState] = useState({ status: "loading", cards: [], name: null, avatar: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!invite.checkinGroupId) { setState({ status: "empty" }); return; }
+
+      const { data, error } = await supabase.rpc("preview_checkin", {
+        p_invite_token: invite.circleToken,
+        p_group_id: invite.checkinGroupId,
+      });
+
+      if (cancelled) return;
+
+      if (error || !data || data.length === 0) {
+        setState({ status: "empty" });
+        return;
+      }
+
+      setState({
+        status: "ready",
+        name: data[0].author_name,
+        avatar: data[0].author_avatar,
+        cards: data.map((r) => ({ type: r.card_type, content: r.card_content })),
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [invite]);
+
+  // No live check-in behind the link -- send them straight to sign-in
+  // rather than showing an empty page.
+  useEffect(() => {
+    if (state.status === "empty") onContinue();
+  }, [state.status]);
+
+  if (state.status !== "ready") {
+    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
+  }
+
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-12 pb-14" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
+      <div className="w-full" style={{ maxWidth: "360px" }}>
+
+        <div className="flex flex-col items-center text-center mb-9">
+          <Avatar url={state.avatar} name={state.name} size={64} />
+          <p className="text-[17px] mt-4" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
+            {state.name} shared their day with you
+          </p>
+        </div>
+
+        {state.cards.map((c, i) => (
+          <div key={i} className="w-full rounded-2xl px-5 py-4 mb-3"
+            style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.12)" }}>
+            <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
+              {TYPE_LABELS[c.type]}
+            </span>
+            <p className="text-[15px] leading-snug mt-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
+              {c.content}
+            </p>
+          </div>
+        ))}
+
+        <div className="mt-9 text-center">
+          <p className="text-[13px] leading-relaxed mb-5" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
+            A rose is something good, a bud is something you're looking forward to, a thorn is something hard. Send {state.name} yours.
+          </p>
+          <button onClick={onContinue}
+            className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+            SHARE MINE BACK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CommentThread({ card, groupId, userId, profiles }) {
+  const [open, setOpen] = useState(false);
+  const [comments, setComments] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = async () => {
+    const { data } = await supabase
+      .from("comments")
+      .select("id, content, user_id, created_at")
+      .eq("card_id", card.id)
+      .order("created_at", { ascending: true });
+    setComments(data || []);
+  };
+
+  useEffect(() => { if (open && comments === null) load(); }, [open]);
+
+  const post = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    setPosting(true);
+    setError(null);
+    const { error: err } = await supabase.from("comments").insert({
+      card_id: card.id,
+      group_id: groupId,
+      user_id: userId,
+      content: text,
+    });
+    setPosting(false);
+    if (err) { setError(err.message); return; }
+    setDraft("");
+    load();
+  };
+
+  const nameFor = (uid) =>
+    uid === userId ? "You" : (profiles[uid] && profiles[uid].display_name) || "Friend";
+
+  return (
+    <div className="mt-1.5">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 text-[10px]"
+        style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+        <MessageCircle size={11} />
+        {open ? "HIDE" : comments && comments.length > 0 ? `${comments.length} REPLIES` : "REPLY"}
+      </button>
+
+      {open && (
+        <div className="mt-2 pl-3" style={{ borderLeft: "2px solid rgba(43,42,31,0.1)" }}>
+          {comments === null ? (
+            <p className="text-[11px]" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
+          ) : (
+            comments.map((c) => (
+              <div key={c.id} className="mb-2 flex items-start gap-2">
+                <Avatar url={profiles[c.user_id] && profiles[c.user_id].avatar_url} name={nameFor(c.user_id)} size={20} />
+                <p className="text-[12px] leading-snug" style={{ color: "rgba(43,42,31,0.8)", fontFamily: "'Fraunces', serif" }}>
+                  <span style={{ fontFamily: "'Special Elite', monospace", fontSize: "10px", color: "rgba(43,42,31,0.5)" }}>
+                    {nameFor(c.user_id)}{" "}
+                  </span>
+                  {c.content}
+                </p>
+              </div>
+            ))
+          )}
+
+          <div className="flex items-center gap-2 mt-2">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") post(); }}
+              placeholder="Say something…"
+              maxLength={500}
+              className="flex-1 px-3 py-2 rounded-full text-[12px] outline-none"
+              style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}
+            />
+            <button onClick={post} disabled={!draft.trim() || posting}
+              className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center disabled:opacity-30"
+              style={{ background: "#2B2A1F" }}>
+              <ArrowRight size={13} color="#EFE9DA" />
+            </button>
+          </div>
+
+          {error && <p className="text-[11px] mt-1" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InboxScreen({ userId, onBack }) {
   const [checkins, setCheckins] = useState(null);
   const [profiles, setProfiles] = useState({});
@@ -983,7 +1150,7 @@ function InboxScreen({ userId, onBack }) {
           groups.map(async (g) => {
             const { data: cards } = await supabase
               .from("cards")
-              .select("type, content, user_id, created_at")
+              .select("id, type, content, user_id, created_at")
               .eq("group_id", g.id)
               .order("created_at", { ascending: true });
             return { ...g, cards: cards || [] };
@@ -1071,13 +1238,14 @@ function InboxScreen({ userId, onBack }) {
 
                   <div style={{ paddingLeft: "42px" }}>
                     {author.cards.map((c, i) => (
-                      <div key={i} className="mb-2.5">
+                      <div key={c.id || i} className="mb-3.5">
                         <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
                           {TYPE_LABELS[c.type]}
                         </span>
                         <p className="text-[13px] leading-snug" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
                           {c.content}
                         </p>
+                        <CommentThread card={c} groupId={g.id} userId={userId} profiles={profiles} />
                       </div>
                     ))}
                   </div>
@@ -1226,6 +1394,8 @@ export default function App() {
   const [profile, setProfile] = useState(undefined);
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState(null);
+
+  const [previewSeen, setPreviewSeen] = useState(false);
 
   const [pendingInvite] = useState(() => {
     const match = window.location.pathname.match(/^\/invite\/([^/]+)/);
@@ -1473,6 +1643,9 @@ export default function App() {
   }
 
   if (!session) {
+    if (pendingInvite && !previewSeen) {
+      return <InvitePreview invite={pendingInvite} onContinue={() => setPreviewSeen(true)} />;
+    }
     return <AuthScreen />;
   }
 
