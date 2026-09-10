@@ -421,6 +421,7 @@ function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, 
 }
 
 const NOTIF_ASKED_KEY = "rbt_notif_asked_v1";
+const PENDING_INVITE_KEY = "rbt_pending_invite_v1";
 
 // Already added to the home screen? Then it launches without browser chrome.
 function isStandalone() {
@@ -512,7 +513,7 @@ function InstallBanner() {
       <button onClick={install}
         className="w-full flex items-center justify-between py-2.5"
         style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Special Elite', monospace", fontSize: "12px" }}>
-        <span>Add to your phone</span>
+        <span>{isIOS() ? "Skip signing in each time" : "Add to your phone"}</span>
         <span style={{
           display: "inline-block",
           transition: "transform 0.15s ease",
@@ -532,8 +533,8 @@ function InstallBanner() {
           ) : (
             <p className="text-[12px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
               {isIOS()
-                ? "Texted links always open in Safari, signed out. Install it and check-ins arrive as notifications instead."
-                : "Install it and check-ins arrive as notifications instead of links."}
+                ? "Links from friends open in Safari, where you're signed out every time. Add it to your home screen and you stay signed in — and check-ins arrive as notifications instead of texts."
+                : "Add it to your home screen to stay signed in, and check-ins arrive as notifications instead of texts."}
             </p>
           )}
           <InstallSteps compact />
@@ -1938,9 +1939,34 @@ export default function App() {
 
   const [pendingInvite] = useState(() => {
     const match = window.location.pathname.match(/^\/invite\/([^/]+)/);
-    if (!match) return null;
-    const params = new URLSearchParams(window.location.search);
-    return { circleToken: match[1], checkinGroupId: params.get("checkin") };
+
+    if (match) {
+      const params = new URLSearchParams(window.location.search);
+      const invite = { circleToken: match[1], checkinGroupId: params.get("checkin") };
+      try {
+        window.localStorage.setItem(
+          PENDING_INVITE_KEY,
+          JSON.stringify({ ...invite, savedAt: Date.now() })
+        );
+      } catch {}
+      return invite;
+    }
+
+    // Coming back from sign-in: the URL is now just "/", so recover it.
+    try {
+      const raw = window.localStorage.getItem(PENDING_INVITE_KEY);
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      // An hour is plenty to finish signing in, and stops a forgotten
+      // invite hijacking a normal sign-in weeks later.
+      if (!saved.savedAt || Date.now() - saved.savedAt > 60 * 60 * 1000) {
+        window.localStorage.removeItem(PENDING_INVITE_KEY);
+        return null;
+      }
+      return { circleToken: saved.circleToken, checkinGroupId: saved.checkinGroupId };
+    } catch {
+      return null;
+    }
   });
 
   useEffect(() => {
@@ -1966,6 +1992,7 @@ export default function App() {
         .single();
 
       if (circleErr || !circle) {
+        try { window.localStorage.removeItem(PENDING_INVITE_KEY); } catch {}
         setJoinError("This invite link isn't valid.");
         return;
       }
@@ -2010,6 +2037,7 @@ export default function App() {
       }
 
       window.history.replaceState({}, "", "/");
+      try { window.localStorage.removeItem(PENDING_INVITE_KEY); } catch {}
 
       if (pendingInvite.checkinGroupId) {
         setGroupId(pendingInvite.checkinGroupId);
