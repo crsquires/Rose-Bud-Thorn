@@ -807,6 +807,7 @@ async function uploadAvatar(userId, file) {
 
 function NameStep({ initialName, onSave, saving, error }) {
   const [name, setName] = useState(initialName || "");
+  const [phone, setPhone] = useState("");
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
@@ -825,21 +826,41 @@ function NameStep({ initialName, onSave, saving, error }) {
         This is the name your friends see on every card you send.
       </p>
 
-      <div className="w-full" style={{ maxWidth: "300px" }}>
+      {/* A real form, because Safari's AutoFill is far more willing inside one. */}
+      <form className="w-full" style={{ maxWidth: "300px" }} onSubmit={(e) => e.preventDefault()}>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Your name"
           maxLength={40}
+          name="name"
+          autoComplete="name"
           className="w-full px-4 py-3 rounded-full text-[14px] text-center outline-none mb-3"
           style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
         />
-        <button onClick={() => onSave(name.trim())} disabled={!name.trim() || saving}
+
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="Phone number (optional)"
+          type="tel"
+          name="tel"
+          autoComplete="tel"
+          maxLength={25}
+          className="w-full px-4 py-3 rounded-full text-[14px] text-center outline-none mb-2"
+          style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}
+        />
+
+        <p className="text-[11px] leading-relaxed mb-4" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>
+          Only used so friends can text you a check-in if you have notifications off. You can add it later instead.
+        </p>
+
+        <button type="button" onClick={() => onSave(name.trim(), phone.trim())} disabled={!name.trim() || saving}
           className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
           style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
           {saving ? "SAVING…" : "CONTINUE"}
         </button>
-      </div>
+      </form>
 
       {error && <p className="text-[12px] mt-4" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
     </div>
@@ -917,6 +938,7 @@ function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave,
 
 function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifStatus, onEnableNotifications, onDisableNotifications }) {
   const [name, setName] = useState(profile?.display_name || "");
+  const [phone, setPhone] = useState(profile?.phone || "");
   const [savingName, setSavingName] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
@@ -938,16 +960,21 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
   const [showGroups, setShowGroups] = useState(false);
   const needsInstall = isIOS() && !isStandalone();
 
-  const dirty = name.trim() !== (profile?.display_name || "") && name.trim().length > 0;
+  const dirty =
+    (name.trim() !== (profile?.display_name || "") && name.trim().length > 0) ||
+    phone.trim() !== (profile?.phone || "");
 
   const saveName = async () => {
     setSavingName(true);
     setError(null);
-    const { error: err } = await supabase.from("users").update({ display_name: name.trim() }).eq("id", userId);
+    const { error: err } = await supabase
+      .from("users")
+      .update({ display_name: name.trim(), phone: phone.trim() || null })
+      .eq("id", userId);
     setSavingName(false);
     if (err) { setError(err.message); return; }
-    onProfileChange({ ...profile, display_name: name.trim() });
-    setNotice("Name updated.");
+    onProfileChange({ ...profile, display_name: name.trim(), phone: phone.trim() || null });
+    setNotice("Saved.");
   };
 
   const pickImage = async (e) => {
@@ -1180,23 +1207,40 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
         </div>
 
         <p className="text-[10px] tracking-[0.2em] mb-3" style={heading}>YOUR NAME</p>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Your name"
-          maxLength={40}
-          className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2"
-          style={pill}
-        />
+        <form onSubmit={(e) => e.preventDefault()}>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your name"
+            maxLength={40}
+            name="name"
+            autoComplete="name"
+            className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2"
+            style={pill}
+          />
+
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Phone number (optional)"
+            type="tel"
+            name="tel"
+            autoComplete="tel"
+            maxLength={25}
+            className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2"
+            style={pill}
+          />
+        </form>
         {dirty && (
           <button onClick={saveName} disabled={savingName}
             className="w-full px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide mb-2 disabled:opacity-50"
             style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-            {savingName ? "SAVING…" : "SAVE NAME"}
+            {savingName ? "SAVING…" : "SAVE"}
           </button>
         )}
         <p className="text-[11px] leading-relaxed mb-8" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif" }}>
-          Your friends see this name and photo on every card you send.
+          Your friends see this name and photo on every card you send. Your number is only used so they can text you
+          a check-in when notifications are off.
         </p>
 
         {/* ---------- notifications ---------- */}
@@ -2333,6 +2377,8 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
 }
 
 function AuthScreen({ invite }) {
+  const oneTimeNote = "You'll only sign in once — after this you can save Rose, Bud, Thorn to your home screen and skip it on future visits.";
+
   const [showEmail, setShowEmail] = useState(false);
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -2434,6 +2480,10 @@ function AuthScreen({ invite }) {
           )}
         </div>
       )}
+
+      <p className="text-[11px] text-center leading-relaxed mt-8 mx-auto px-6" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif", maxWidth: "300px" }}>
+        {oneTimeNote}
+      </p>
     </div>
   );
 }
@@ -2602,7 +2652,7 @@ export default function App() {
     (async () => {
       const { data } = await supabase
         .from("users")
-        .select("id, display_name, avatar_url")
+        .select("id, display_name, avatar_url, phone")
         .eq("id", session.user.id)
         .maybeSingle();
 
@@ -2636,11 +2686,11 @@ export default function App() {
     return () => { cancelled = true; };
   }, [session]);
 
-  const saveDisplayName = async (value) => {
+  const saveDisplayName = async (value, phoneValue) => {
     setSavingName(true);
     setNameError(null);
     const { error } = await supabase.from("users").upsert(
-      { id: session.user.id, display_name: value },
+      { id: session.user.id, display_name: value, phone: phoneValue || null },
       { onConflict: "id" }
     );
     setSavingName(false);
@@ -2649,7 +2699,7 @@ export default function App() {
       setNameError(error.message);
       return;
     }
-    setProfile((p) => ({ ...(p || { id: session.user.id }), display_name: value }));
+    setProfile((p) => ({ ...(p || { id: session.user.id }), display_name: value, phone: phoneValue || null }));
   };
 
   // Refresh the icon badge on load, so it is correct even for someone who
