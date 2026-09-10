@@ -123,7 +123,7 @@ function PostcardBack({ slide, index, value, onChange }) {
   );
 }
 
-function IntroCarousel({ onBegin, onGoHome, onProfile, profile, title, entries, setEntries, saving, saveError, joinedExisting }) {
+function IntroCarousel({ onBegin, onGoHome, onProfile, profile, title, entries, setEntries, saving, saveError, joinedExisting, theirCards, theirName, theirAvatar, groupId, userId, profiles }) {
   const [index, setIndex] = useState(0);
   const [dragX, setDragX] = useState(0);
   const start = useRef(null);
@@ -190,9 +190,37 @@ function IntroCarousel({ onBegin, onGoHome, onProfile, profile, title, entries, 
         </p>
       )}
 
-      {joinedExisting && (
+      {theirCards && theirCards[INTRO_SLIDES[index].key] && (
+        <div className="w-full mx-auto mb-5 px-1" style={{ maxWidth: "440px" }}>
+          <div className="rounded-2xl px-4 py-3.5" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.12)" }}>
+            <div className="flex items-center gap-2 mb-2">
+              <Avatar url={theirAvatar} name={theirName} size={26} />
+              <span className="text-[11px]" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+                {theirName}'s {INTRO_SLIDES[index].word.toLowerCase()}
+              </span>
+            </div>
+
+            <p className="text-[14px] leading-snug" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
+              {theirCards[INTRO_SLIDES[index].key].content}
+            </p>
+
+            <CommentThread
+              card={theirCards[INTRO_SLIDES[index].key]}
+              groupId={groupId}
+              userId={userId}
+              profiles={profiles || {}}
+            />
+          </div>
+
+          <p className="text-[11px] text-center mt-3" style={{ color: "rgba(60,48,35,0.5)", fontFamily: "'Special Elite', monospace" }}>
+            NOW WRITE YOURS
+          </p>
+        </div>
+      )}
+
+      {joinedExisting && !theirCards && (
         <p className="text-[12px] text-center leading-relaxed mb-4 px-4" style={{ color: "rgba(60,48,35,0.7)", fontFamily: "'Fraunces', serif", fontStyle: "italic", maxWidth: "340px" }}>
-          Fill out your rose, bud & thorn to see what they shared.
+          Fill out your rose, bud & thorn to share yours back.
         </p>
       )}
 
@@ -1691,95 +1719,6 @@ function InviteWelcome({ invite }) {
 }
 
 // Straight after joining: read what they sent, then write yours.
-function ReceivedCheckIn({ groupId, onContinue }) {
-  const [state, setState] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data: group } = await supabase
-        .from("groups")
-        .select("id, created_by, title")
-        .eq("id", groupId)
-        .maybeSingle();
-
-      if (!group) { if (!cancelled) setState({ cards: [] }); return; }
-
-      const [{ data: cards }, { data: people }] = await Promise.all([
-        supabase
-          .from("cards")
-          .select("id, type, content, created_at")
-          .eq("group_id", groupId)
-          .eq("user_id", group.created_by)
-          .order("created_at", { ascending: true }),
-        supabase.rpc("profiles_for_my_checkins"),
-      ]);
-
-      if (cancelled) return;
-
-      const author = (people || []).find((p) => p.id === group.created_by);
-      setState({
-        cards: cards || [],
-        title: group.title,
-        name: (author && author.display_name) || "Your friend",
-        avatar: author && author.avatar_url,
-      });
-    })();
-    return () => { cancelled = true; };
-  }, [groupId]);
-
-  if (!state) {
-    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
-  }
-
-  // Nothing to read (they sent an empty check-in) -- skip straight to writing.
-  if (state.cards.length === 0) {
-    onContinue();
-    return <div className="min-h-screen w-full" style={{ background: "#EFE9DA" }} />;
-  }
-
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-12 pb-14" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');`}</style>
-      <div className="w-full" style={{ maxWidth: "360px" }}>
-
-        <div className="flex flex-col items-center text-center mb-9">
-          <Avatar url={state.avatar} name={state.name} size={64} />
-          <p className="text-[17px] mt-4" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
-            {state.title ? `${state.name} on ${state.title}` : `${state.name}'s day`}
-          </p>
-        </div>
-
-        {state.cards.map((c) => (
-          <div key={c.id} className="w-full rounded-2xl px-5 py-4 mb-3"
-            style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.12)" }}>
-            <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
-              {TYPE_LABELS[c.type]}
-            </span>
-            <p className="text-[15px] leading-snug mt-1" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
-              {c.content}
-            </p>
-          </div>
-        ))}
-
-        <div className="mt-9 text-center">
-          <p className="text-[13px] leading-relaxed mb-5" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-            A rose is something good, a bud is something you're looking forward to, a thorn is something hard. Send {state.name} yours{state.title ? ` from ${state.title}` : ""}.
-          </p>
-          <button onClick={onContinue}
-            className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
-            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-            SHARE MINE BACK
-          </button>
-          <p className="text-[11px] mt-4" style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
-            you can reply to any of these from your inbox
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function CommentThread({ card, groupId, userId, profiles }) {
   const [open, setOpen] = useState(false);
   const [comments, setComments] = useState(null);
@@ -2256,6 +2195,7 @@ export default function App() {
   const [showPrimer, setShowPrimer] = useState(false);
   const [profile, setProfile] = useState(undefined);
   const [checkInTitle, setCheckInTitle] = useState(null);
+  const [theirCheckIn, setTheirCheckIn] = useState(null);
   const [inboxTab, setInboxTab] = useState("inbox");
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState(null);
@@ -2366,7 +2306,8 @@ export default function App() {
         setGroupId(pendingInvite.checkinGroupId);
         setJoinedExisting(true);
         setCardEntries({ rose: "", bud: "", thorn: "" });
-        setStage("received");
+        await loadTheirCheckIn(pendingInvite.checkinGroupId, session.user.id);
+        setStage("cards");
       } else {
         setStage("home");
       }
@@ -2523,12 +2464,52 @@ export default function App() {
     setShowPrimer(false);
   };
 
+  // Everything the other person wrote in this check-in, keyed by type, so
+  // each writing card can sit under the matching one of theirs.
+  const loadTheirCheckIn = async (gid, uid) => {
+    const [{ data: cards, error: cardsErr }, { data: people }] = await Promise.all([
+      supabase
+        .from("cards")
+        .select("id, type, content, user_id, created_at")
+        .eq("group_id", gid)
+        .neq("user_id", uid)
+        .order("created_at", { ascending: true }),
+      supabase.rpc("profiles_for_my_checkins"),
+    ]);
+
+    if (cardsErr) {
+      console.error("couldn't load their cards:", cardsErr.message);
+      setTheirCheckIn(null);
+      return;
+    }
+    if (!cards || cards.length === 0) {
+      console.warn("no cards from anyone else in this check-in");
+      setTheirCheckIn(null);
+      return;
+    }
+
+    const byId = {};
+    (people || []).forEach((p) => { byId[p.id] = p; });
+
+    const byType = {};
+    cards.forEach((c) => { if (!byType[c.type]) byType[c.type] = c; });
+
+    const author = byId[cards[0].user_id];
+    setTheirCheckIn({
+      cards: byType,
+      profiles: byId,
+      name: (author && author.display_name) || "Your friend",
+      avatar: author && author.avatar_url,
+    });
+  };
+
   const startCheckIn = () => {
     setSaveError(null);
     setCardEntries({ rose: "", bud: "", thorn: "" });
     setGroupId(null);
     setJoinedExisting(false);
     setCheckInTitle(null);
+    setTheirCheckIn(null);
     setSendOrigin("flow");
     setStage("kind");
   };
@@ -2704,10 +2685,6 @@ export default function App() {
     );
   }
 
-  if (stage === "received") {
-    return <ReceivedCheckIn groupId={groupId} onContinue={() => setStage("cards")} />;
-  }
-
   if (stage === "cards") {
     return (
       <IntroCarousel
@@ -2715,6 +2692,12 @@ export default function App() {
         setEntries={setCardEntries}
         onBegin={finishCheckIn}
         title={checkInTitle}
+        theirCards={theirCheckIn && theirCheckIn.cards}
+        theirName={theirCheckIn && theirCheckIn.name}
+        theirAvatar={theirCheckIn && theirCheckIn.avatar}
+        profiles={theirCheckIn && theirCheckIn.profiles}
+        groupId={groupId}
+        userId={session.user.id}
         onGoHome={() => setStage("home")}
         onProfile={() => setStage("profile")}
         profile={profile}
