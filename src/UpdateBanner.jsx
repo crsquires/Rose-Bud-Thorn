@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { setUpdatePending } from "./badge.js";
 
 const CHECK_EVERY_MS = 30 * 60 * 1000; // while the app stays open
 const MIN_GAP_MS = 60 * 1000;          // don't re-check more than once a minute
@@ -29,6 +30,12 @@ export default function UpdateBanner() {
           reg?.update();
           setReady(true);
           setDismissed(false);
+          // Put a mark on the home screen icon, so tapping "Later" and
+          // closing the app doesn't mean forgetting about it.
+          setUpdatePending(true);
+        } else if (live) {
+          // Already on the current build.
+          setUpdatePending(false);
         }
       } catch {
         // Offline or a bad response: try again next time.
@@ -93,7 +100,10 @@ export default function UpdateBanner() {
         </button>
         <button
           type="button"
-          onClick={() => window.location.reload()}
+          onClick={() => {
+            setUpdatePending(false);
+            window.location.reload();
+          }}
           className="text-[12px] tracking-wide px-3 py-2"
           style={{ background: "#E9DCBE", color: "#2B2A1F", border: "none", borderRadius: "3px 5px 4px 6px", fontFamily: "'Special Elite', monospace" }}
         >
