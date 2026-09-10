@@ -1574,10 +1574,27 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
           : Promise.resolve(),
       ]);
 
+      // Anyone we can neither push nor text: make them a link the sender can
+      // hand over however they like. Better than asking someone to type in
+      // another person's phone number.
+      const noRoute = unlinked.filter((c) => !c.phone);
+      let handoff = null;
+      if (noRoute.length > 0) {
+        const circle = await makeCircle(
+          noRoute.length === 1 ? noRoute[0].name : "Check-in",
+          noRoute.length === 1 ? noRoute[0].id : null
+        );
+        handoff = {
+          names: noRoute.map((c) => c.name),
+          message: inviteMessage(title, `${window.location.origin}/invite/${circle.invite_token}?checkin=${groupId}`),
+        };
+      }
+
       setResult({
         pushed: linked.length,
         texted: withPhones.length,
-        skipped: unlinked.length - withPhones.length,
+        skipped: noRoute.length,
+        handoff,
         smsOpened,
       });
     } catch (e) {
@@ -1667,11 +1684,29 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
               {result.texted} {result.texted === 1 ? "invite is" : "invites are"} waiting in your Messages app — hit send there to finish.
             </p>
           )}
-          {result.skipped > 0 && (
-            <p className="mb-2" style={{ color: "#8C2F45" }}>
-              {result.skipped} {result.skipped === 1 ? "person has" : "people have"} notifications off and no phone number saved,
-              so there was no way to reach them. Add a number on your profile and they'll get a text next time.
-            </p>
+          {result.handoff && (
+            <div className="mb-2">
+              <p className="mb-3">
+                {result.handoff.names.join(" & ")} {result.handoff.names.length === 1 ? "doesn't have" : "don't have"} notifications
+                turned on yet, so send them this however you like.
+              </p>
+              <button
+                onClick={async () => {
+                  if (navigator.share) {
+                    try { await navigator.share({ text: result.handoff.message }); } catch {}
+                  } else {
+                    await navigator.clipboard.writeText(result.handoff.message);
+                    setResult({ ...result, copied: true });
+                  }
+                }}
+                className="px-5 py-2.5 rounded-full text-[12px] font-bold tracking-wide"
+                style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+                SHARE THEIR LINK
+              </button>
+              {result.copied && (
+                <p className="mt-2 text-[12px]" style={{ color: "#4B5E33" }}>Copied.</p>
+              )}
+            </div>
           )}
         </div>
 
