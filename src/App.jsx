@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Bell, Check, Users, Camera, MessageCircle } from "lucide-react";
 import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
+import { setUnreadCount } from "./badge.js";
 import { STAMP_IMG, WORD_IMG } from "./assets";
 
 function hexToRgba(hex, alpha) {
@@ -278,7 +279,7 @@ async function disablePushNotifications(userId) {
       await supabase.from("push_subscriptions").delete().eq("user_id", userId);
     }
 
-    await updateAppBadge(0);
+    await setUnreadCount(0);
     return { error: null };
   } catch (err) {
     return { error: err.message || "Couldn't turn notifications off." };
@@ -482,22 +483,6 @@ function iosPushUnsupported() {
   const v = iosVersion();
   if (!v) return false;
   return v.major < 16 || (v.major === 16 && v.minor < 4);
-}
-
-// Sets the number on the home screen icon. Only exists for installed web
-// apps on iOS 16.4+ and Chromium desktop, so feature-detect every time.
-async function updateAppBadge(count) {
-  try {
-    if ("setAppBadge" in navigator) {
-      if (count > 0) await navigator.setAppBadge(count);
-      else await navigator.clearAppBadge();
-    }
-    // Also tell the service worker, so the count survives the app closing.
-    const reg = await navigator.serviceWorker?.ready;
-    reg?.active?.postMessage({ type: "SET_BADGE", count });
-  } catch {
-    // Unsupported or permission not granted -- nothing to do.
-  }
 }
 
 function isIOS() {
@@ -1951,7 +1936,7 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
     setCheckins(built);
 
     const totalUnread = built.reduce((n, g) => n + g.unread, 0);
-    updateAppBadge(totalUnread);
+    setUnreadCount(totalUnread);
     if (onUnreadChange) onUnreadChange(totalUnread);
   };
 
@@ -1984,7 +1969,7 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
     setCheckins((prev) => {
       const next = (prev || []).map((c) => (c.id === g.id ? { ...c, unread: 0 } : c));
       const totalUnread = next.reduce((n, x) => n + x.unread, 0);
-      updateAppBadge(totalUnread);
+      setUnreadCount(totalUnread);
       if (onUnreadChange) onUnreadChange(totalUnread);
       return next;
     });
@@ -2466,7 +2451,7 @@ export default function App() {
       const live = (memberships || []).filter(
         (m) => m.groups && new Date(m.groups.expires_at) > new Date()
       );
-      if (live.length === 0) { if (!cancelled) updateAppBadge(0); return; }
+      if (live.length === 0) { if (!cancelled) setUnreadCount(0); return; }
 
       const ids = live.map((m) => m.group_id);
       const [{ data: cards }, { data: comments }] = await Promise.all([
@@ -2483,7 +2468,7 @@ export default function App() {
         return n + (cards || []).filter(isNew).length + (comments || []).filter(isNew).length;
       }, 0);
 
-      if (!cancelled) updateAppBadge(count);
+      if (!cancelled) setUnreadCount(count);
     })();
 
     return () => { cancelled = true; };
