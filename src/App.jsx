@@ -714,6 +714,43 @@ function NameStep({ initialName, onSave, saving, error }) {
   );
 }
 
+function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave, onRemove }) {
+  return (
+    <div className="px-1 pt-2 pb-1">
+      <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40}
+        placeholder='Group name — e.g. "College Friends"'
+        className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-3" style={pill} />
+
+      <p className="text-[11px] mb-2" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Who's in it?</p>
+      {contacts.map((c) => {
+        const on = picks.includes(c.id);
+        return (
+          <button key={c.id} onClick={() => togglePick(c.id)}
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl mb-2"
+            style={{ ...pill, background: on ? "#2B2A1F" : "#fff", color: on ? "#EFE9DA" : "#2B2A1F" }}>
+            <span className="text-[13px]">{c.name}</span>
+            {on && <Check size={14} />}
+          </button>
+        );
+      })}
+
+      <div className="flex gap-2 mt-2">
+        <button onClick={onSave} disabled={!name.trim() || picks.length === 0}
+          className="flex-1 px-3 py-2 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-40"
+          style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+          SAVE
+        </button>
+        {onRemove && (
+          <button onClick={onRemove} className="px-4 py-2 rounded-full text-[11px]"
+            style={{ background: "rgba(140,47,69,0.1)", color: "#8C2F45", fontFamily: "'Special Elite', monospace" }}>
+            REMOVE
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifStatus, onEnableNotifications }) {
   const [name, setName] = useState(profile?.display_name || "");
   const [savingName, setSavingName] = useState(false);
@@ -721,6 +758,14 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const fileRef = useRef(null);
+
+  const [contacts, setContacts] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [editContact, setEditContact] = useState(null);   // contact id
+  const [editName, setEditName] = useState("");
+  const [editGroup, setEditGroup] = useState(null);       // group id, or "new"
+  const [groupName, setGroupName] = useState("");
+  const [groupPicks, setGroupPicks] = useState([]);
   const needsInstall = isIOS() && !isStandalone();
 
   const dirty = name.trim() !== (profile?.display_name || "") && name.trim().length > 0;
@@ -752,6 +797,131 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
       setUploading(false);
     }
   };
+
+  const loadPeople = async () => {
+    const [{ data: cs }, { data: gs }] = await Promise.all([
+      supabase
+        .from("contacts")
+        .select("id, name, phone, linked_user_id")
+        .eq("owner_id", userId)
+        .order("name"),
+      supabase
+        .from("contact_groups")
+        .select("id, name, contact_group_members(contact_id)")
+        .eq("owner_id", userId)
+        .order("name"),
+    ]);
+    setContacts(cs || []);
+    setGroups(gs || []);
+  };
+
+  useEffect(() => { loadPeople(); }, [userId]);
+
+  const openContact = (c) => {
+    setEditContact(editContact === c.id ? null : c.id);
+    setEditName(c.name);
+    setEditGroup(null);
+  };
+
+  const renameContact = async (c) => {
+    if (!editName.trim()) return;
+    const { error: err } = await supabase
+      .from("contacts")
+      .update({ name: editName.trim() })
+      .eq("id", c.id);
+    if (err) { setError(err.message); return; }
+    setEditContact(null);
+    setNotice("Saved.");
+    loadPeople();
+  };
+
+  const removeContact = async (c) => {
+    if (!window.confirm(`Remove ${c.name}? They'll drop out of any groups too.`)) return;
+    const { error: err } = await supabase.from("contacts").delete().eq("id", c.id);
+    if (err) { setError(err.message); return; }
+    setEditContact(null);
+    loadPeople();
+  };
+
+  const openGroup = (g) => {
+    if (g === "new") {
+      setEditGroup("new");
+      setGroupName("");
+      setGroupPicks([]);
+    } else {
+      setEditGroup(editGroup === g.id ? null : g.id);
+      setGroupName(g.name);
+      setGroupPicks((g.contact_group_members || []).map((m) => m.contact_id));
+    }
+    setEditContact(null);
+  };
+
+  const saveGroup = async () => {
+    if (!groupName.trim() || groupPicks.length === 0) return;
+    setError(null);
+
+    let groupId = editGroup;
+
+    if (editGroup === "new") {
+      const { data, error: err } = await supabase
+        .from("contact_groups")
+        .insert({ owner_id: userId, name: groupName.trim() })
+        .select()
+        .single();
+      if (err) { setError(err.message); return; }
+      groupId = data.id;
+    } else {
+      const { error: err } = await supabase
+        .from("contact_groups")
+        .update({ name: groupName.trim() })
+        .eq("id", groupId);
+      if (err) { setError(err.message); return; }
+      // Simplest correct approach: clear the membership and rewrite it.
+      await supabase.from("contact_group_members").delete().eq("contact_group_id", groupId);
+    }
+
+    const { error: memberErr } = await supabase
+      .from("contact_group_members")
+      .insert(groupPicks.map((contactId) => ({ contact_group_id: groupId, contact_id: contactId })));
+    if (memberErr) { setError(memberErr.message); return; }
+
+    setEditGroup(null);
+    setNotice("Saved.");
+    loadPeople();
+  };
+
+  const removeGroup = async (g) => {
+    if (!window.confirm(`Remove "${g.name}"? The people in it stay in your contacts.`)) return;
+    const { error: err } = await supabase.from("contact_groups").delete().eq("id", g.id);
+    if (err) { setError(err.message); return; }
+    setEditGroup(null);
+    loadPeople();
+  };
+
+  // An invite with no check-in attached -- purely to connect, so they show up
+  // in your list ready for next time.
+  const inviteSomeone = async () => {
+    setError(null);
+    const { data: circle, error: err } = await supabase
+      .from("circles")
+      .insert({ owner_id: userId, name: "Invite" })
+      .select()
+      .single();
+    if (err) { setError(err.message); return; }
+
+    const url = `${window.location.origin}/invite/${circle.invite_token}`;
+    const msg = `Join me on Rose, Bud, Thorn — I want to hear how your day's going: ${url}`;
+    if (navigator.share) {
+      try { await navigator.share({ text: msg }); } catch { return; }
+      setNotice("Invite sent. They'll appear here once they join.");
+    } else {
+      await navigator.clipboard.writeText(msg);
+      setNotice("Invite link copied.");
+    }
+  };
+
+  const togglePick = (id) =>
+    setGroupPicks((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const pill = { background: "#fff", border: "1px solid rgba(43,42,31,0.15)", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" };
   const heading = { color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" };
@@ -840,6 +1010,111 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
           <p className="text-[11px] leading-relaxed" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>
             Couldn't turn them on on this device.
           </p>
+        )}
+
+        {/* ---------- people ---------- */}
+        <div className="flex items-center justify-between mt-9 mb-3">
+          <p className="text-[10px] tracking-[0.2em]" style={heading}>PEOPLE</p>
+          <button onClick={inviteSomeone} className="text-[11px] underline"
+            style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
+            invite someone
+          </button>
+        </div>
+
+        {contacts === null ? (
+          <p className="text-[12px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
+        ) : contacts.length === 0 ? (
+          <p className="text-[12px] leading-relaxed" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
+            Nobody here yet. People appear once they open one of your links.
+          </p>
+        ) : (
+          contacts.map((c) => (
+            <div key={c.id} className="mb-2">
+              <button onClick={() => openContact(c)}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={pill}>
+                <span className="flex items-center gap-2.5 text-[13px]">
+                  <Avatar url={null} name={c.name} size={26} />
+                  {c.name}
+                </span>
+                <span className="text-[10px]" style={{ color: c.linked_user_id ? "#4B5E33" : "rgba(43,42,31,0.4)" }}>
+                  {c.linked_user_id ? "ON THE APP" : (c.phone || "invited")}
+                </span>
+              </button>
+
+              {editContact === c.id && (
+                <div className="px-1 pt-2">
+                  <input value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={40}
+                    className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-2" style={pill} />
+                  <div className="flex gap-2">
+                    <button onClick={() => renameContact(c)}
+                      className="flex-1 px-3 py-2 rounded-full text-[11px] font-bold tracking-wide"
+                      style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+                      SAVE
+                    </button>
+                    <button onClick={() => removeContact(c)}
+                      className="px-4 py-2 rounded-full text-[11px]"
+                      style={{ background: "rgba(140,47,69,0.1)", color: "#8C2F45", fontFamily: "'Special Elite', monospace" }}>
+                      REMOVE
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+
+        {/* ---------- groups ---------- */}
+        <div className="flex items-center justify-between mt-9 mb-3">
+          <p className="text-[10px] tracking-[0.2em]" style={heading}>GROUPS</p>
+          <button onClick={() => openGroup("new")} disabled={!contacts || contacts.length === 0}
+            className="text-[11px] underline disabled:opacity-30"
+            style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
+            new group
+          </button>
+        </div>
+
+        {groups.length === 0 && editGroup !== "new" && (
+          <p className="text-[12px] leading-relaxed" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
+            No groups yet. Bundle people together so you can send to all of them at once.
+          </p>
+        )}
+
+        {groups.map((g) => (
+          <div key={g.id} className="mb-2">
+            <button onClick={() => openGroup(g)}
+              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={pill}>
+              <span className="flex items-center gap-2 text-[13px]"><Users size={14} /> {g.name}</span>
+              <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.4)" }}>
+                {g.contact_group_members?.length || 0} people
+              </span>
+            </button>
+
+            {editGroup === g.id && (
+              <GroupEditor
+                pill={pill}
+                contacts={contacts || []}
+                name={groupName}
+                setName={setGroupName}
+                picks={groupPicks}
+                togglePick={togglePick}
+                onSave={saveGroup}
+                onRemove={() => removeGroup(g)}
+              />
+            )}
+          </div>
+        ))}
+
+        {editGroup === "new" && (
+          <GroupEditor
+            pill={pill}
+            contacts={contacts || []}
+            name={groupName}
+            setName={setGroupName}
+            picks={groupPicks}
+            togglePick={togglePick}
+            onSave={saveGroup}
+            onRemove={null}
+          />
         )}
 
         {notice && <p className="text-[11px] mt-6" style={{ color: "#4B5E33", fontFamily: "'Fraunces', serif" }}>{notice}</p>}
