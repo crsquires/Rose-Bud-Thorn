@@ -1548,10 +1548,12 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
 
     if (ids.length === 0) { setCheckins([]); return; }
 
-    const [{ data: cards }, { data: comments }, { data: people }] = await Promise.all([
+    const [{ data: cards }, { data: comments }, { data: people }, { data: allMembers }] = await Promise.all([
       supabase.from("cards").select("id, group_id, type, content, user_id, created_at").in("group_id", ids),
       supabase.from("comments").select("id, group_id, card_id, user_id, content, created_at").in("group_id", ids),
       supabase.rpc("profiles_for_my_checkins"),
+      // Who it went to, whether or not they have written anything yet.
+      supabase.from("group_members").select("group_id, user_id").in("group_id", ids),
     ]);
 
     const byId = {};
@@ -1578,7 +1580,11 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
         const stamps = [g.created_at, ...myCards.map((c) => c.created_at), ...myComments.map((c) => c.created_at)];
         const lastActivity = stamps.reduce((a, b) => (new Date(b) > new Date(a) ? b : a), g.created_at);
 
-        return { ...g, cards: myCards, comments: myComments, unread, lastActivity };
+        const memberIds = [...new Set(
+          (allMembers || []).filter((x) => x.group_id === g.id).map((x) => x.user_id)
+        )];
+
+        return { ...g, cards: myCards, comments: myComments, memberIds, unread, lastActivity };
       })
       .filter((g) => g.cards.length > 0)
       .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
@@ -1596,10 +1602,12 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
   const nameFor = (uid) =>
     uid === userId ? "You" : (profiles[uid] && profiles[uid].display_name) || "Friend";
 
-  // Who is in this check-in, other than me.
-  const othersIn = (g) => {
-    const ids = [...new Set(g.cards.map((c) => c.user_id))].filter((id) => id !== userId);
-    return ids.length === 0 ? ["You"] : ids.map(nameFor);
+  // Everyone this check-in involves apart from me. Members first, so a
+  // check-in shows who it went to even before they have replied.
+  const otherIds = (g) => {
+    const fromMembers = (g.memberIds || []).filter((id) => id !== userId);
+    if (fromMembers.length > 0) return fromMembers;
+    return [...new Set(g.cards.map((c) => c.user_id))].filter((id) => id !== userId);
   };
 
   const openCheckIn = async (g) => {
@@ -1710,10 +1718,13 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
           </p>
         ) : (
           visible.map((g) => {
-            const names = othersIn(g);
-            const label = names.length > 2
-              ? `${names[0]}, ${names[1]} +${names.length - 2}`
-              : names.join(" & ");
+            const ids = otherIds(g);
+            const names = ids.map(nameFor);
+            const label = names.length === 0
+              ? "Waiting for a reply"
+              : names.length > 2
+                ? `${names[0]}, ${names[1]} +${names.length - 2}`
+                : names.join(" & ");
 
             return (
               <button key={g.id} onClick={() => openCheckIn(g)}
@@ -1723,8 +1734,8 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
                   border: g.unread > 0 ? "1px solid rgba(43,42,31,0.35)" : "1px solid rgba(43,42,31,0.12)",
                 }}>
                 <Avatar
-                  url={profiles[g.cards.find((c) => c.user_id !== userId)?.user_id]?.avatar_url}
-                  name={names[0]}
+                  url={profiles[ids[0]] && profiles[ids[0]].avatar_url}
+                  name={names[0] || "?"}
                   size={38}
                 />
 
