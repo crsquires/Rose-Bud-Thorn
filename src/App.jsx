@@ -1928,10 +1928,17 @@ export default function App() {
       const avatar = (data && data.avatar_url) || meta.avatar_url || meta.picture || null;
 
       if (fromProvider) {
-        await supabase.from("users").upsert(
+        const { error: seedErr } = await supabase.from("users").upsert(
           { id: session.user.id, display_name: fromProvider, avatar_url: avatar },
           { onConflict: "id" }
         );
+        if (seedErr) {
+          // Don't pretend it saved -- fall through to the name step so the
+          // person can set it, and surface the real reason in the console.
+          console.error("couldn't save profile name:", seedErr.message);
+          if (!cancelled) setProfile({ id: session.user.id, display_name: null, avatar_url: avatar });
+          return;
+        }
         if (!cancelled) setProfile({ id: session.user.id, display_name: fromProvider, avatar_url: avatar });
         return;
       }
@@ -1950,7 +1957,11 @@ export default function App() {
       { onConflict: "id" }
     );
     setSavingName(false);
-    if (error) { setNameError(error.message); return; }
+    if (error) {
+      console.error("couldn't save display name:", error.message);
+      setNameError(error.message);
+      return;
+    }
     setProfile((p) => ({ ...(p || { id: session.user.id }), display_name: value }));
   };
 
