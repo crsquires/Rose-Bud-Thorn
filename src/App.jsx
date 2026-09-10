@@ -66,6 +66,60 @@ const INTRO_SLIDES = [
   { key: "thorn", word: "Thorn", note: "something hard, or a recent struggle.", ink: "#7A4A28" },
 ];
 
+// The same postcard, already written on. Used to show the other person's
+// card above your blank one.
+function PostcardFrom({ slide, index, content, name, avatarUrl }) {
+  const { word, ink } = slide;
+  const leftLines = useMemo(() => fadedRuledLines(24, "rgba(80,62,38,0.14)"), []);
+  const rightLines = useMemo(() => fadedRuledLines(19, "rgba(80,62,38,0.12)"), []);
+
+  return (
+    <div className="relative w-full h-full overflow-hidden flex flex-col" style={{
+      background: "#E9DCBE",
+      boxShadow: "inset 0 0 50px rgba(90,65,35,0.22), inset 0 0 10px rgba(60,42,20,0.2), 0 1px 0 rgba(0,0,0,0.05), 0 16px 34px -14px rgba(43,42,31,0.45)",
+      border: "1px solid rgba(100,80,50,0.35)",
+      borderRadius: "6px 10px 8px 12px",
+    }}>
+      <div className="absolute inset-0 pointer-events-none" style={{ background: STAIN_SETS[index % STAIN_SETS.length] }} />
+      <div className="absolute inset-0 pointer-events-none" style={{ boxShadow: "inset 0 0 4px rgba(70,50,25,0.35)" }} />
+
+      <img src={WORD_IMG[slide.key]} alt={word} className="absolute object-contain object-left" style={{ left: "54%", top: "5%", width: "24%", filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.1))" }} />
+
+      <div className="absolute" style={{ top: "4%", right: "4%", width: "19%" }}>
+        <BrandStamp ink={ink} />
+      </div>
+
+      <DatePostmark ink={ink} />
+
+      <div className="absolute pointer-events-none" style={{ left: "50%", top: "7%", bottom: "10%", width: "1px", background: "rgba(100,75,45,0.4)" }} />
+
+      <div className="absolute overflow-hidden" style={{ left: "5%", top: "9%", width: "39%", bottom: "8%", backgroundImage: leftLines, backgroundPosition: "0 3px" }}>
+        <p style={{
+          margin: 0,
+          color: hexToRgba(ENTRY_INK, 0.75),
+          fontFamily: "'Permanent Marker', cursive",
+          fontSize: "14px",
+          lineHeight: "24px",
+          wordBreak: "break-word",
+          overflowWrap: "break-word",
+          whiteSpace: "pre-wrap",
+          textShadow: "0.4px 0.4px 0 rgba(60,42,20,0.12)",
+        }}>
+          {content}
+        </p>
+      </div>
+
+      {/* address side: who it came from */}
+      <div className="absolute overflow-hidden flex items-center gap-1.5" style={{ left: "58%", top: "62%", width: "33%", height: "57px", backgroundImage: rightLines, backgroundPosition: "0 3px" }}>
+        <Avatar url={avatarUrl} name={name} size={20} />
+        <p className="text-left" style={{ margin: 0, lineHeight: "19px", color: hexToRgba(ENTRY_INK, 0.7), fontFamily: "'Permanent Marker', cursive", fontSize: "10.5px", textShadow: "0.4px 0.4px 0 rgba(60,42,20,0.12)" }}>
+          from {name}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function PostcardBack({ slide, index, value, onChange }) {
   const { word, note, ink } = slide;
   const leftLines = useMemo(() => fadedRuledLines(24, "rgba(80,62,38,0.14)"), []);
@@ -191,19 +245,18 @@ function IntroCarousel({ onBegin, onGoHome, onProfile, profile, title, entries, 
       )}
 
       {theirCards && theirCards[INTRO_SLIDES[index].key] && (
-        <div className="w-full mx-auto mb-5 px-1" style={{ maxWidth: "440px" }}>
-          <div className="rounded-2xl px-4 py-3.5" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.12)" }}>
-            <div className="flex items-center gap-2 mb-2">
-              <Avatar url={theirAvatar} name={theirName} size={26} />
-              <span className="text-[11px]" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-                {theirName}'s {INTRO_SLIDES[index].word.toLowerCase()}
-              </span>
-            </div>
+        <div className="w-full max-w-md md:max-w-xl mx-auto mb-4 px-1">
+          <div className="w-full rounded-[3px] overflow-hidden" style={{ aspectRatio: "3 / 2" }}>
+            <PostcardFrom
+              slide={INTRO_SLIDES[index]}
+              index={index}
+              content={theirCards[INTRO_SLIDES[index].key].content}
+              name={theirName}
+              avatarUrl={theirAvatar}
+            />
+          </div>
 
-            <p className="text-[14px] leading-snug" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
-              {theirCards[INTRO_SLIDES[index].key].content}
-            </p>
-
+          <div className="px-1 mt-2">
             <CommentThread
               card={theirCards[INTRO_SLIDES[index].key]}
               groupId={groupId}
@@ -212,7 +265,7 @@ function IntroCarousel({ onBegin, onGoHome, onProfile, profile, title, entries, 
             />
           </div>
 
-          <p className="text-[11px] text-center mt-3" style={{ color: "rgba(60,48,35,0.5)", fontFamily: "'Special Elite', monospace" }}>
+          <p className="text-[11px] text-center mt-4" style={{ color: "rgba(60,48,35,0.5)", fontFamily: "'Special Elite', monospace" }}>
             NOW WRITE YOURS
           </p>
         </div>
