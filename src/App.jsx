@@ -595,13 +595,14 @@ function InstallSteps({ compact }) {
     return (
       <div className={compact ? "" : "mt-2"} style={{ maxWidth: "300px" }}>
         <p className="text-[13px] leading-relaxed mb-2" style={line}>
-          1. Tap the Share button at the bottom of Safari (the square with an arrow).
+          1. At the bottom of Safari, tap the <strong>Share</strong> icon — a square with an arrow. On newer iPhones
+          it's inside the <strong>•••</strong> menu.
         </p>
         <p className="text-[13px] leading-relaxed mb-2" style={line}>
           2. Scroll down and tap <strong>Add to Home Screen</strong>.
         </p>
         <p className="text-[13px] leading-relaxed" style={line}>
-          3. Open Rose, Bud, Thorn from your home screen from now on.
+          3. Open Rose, Bud, Thorn from that icon from now on.
         </p>
       </div>
     );
@@ -619,7 +620,75 @@ function InstallSteps({ compact }) {
   );
 }
 
-// Quiet, dismissible nudge on the home screen. Not a blocker -- people who
+const INSTALL_PROMPTED_KEY = "rbt_install_prompted_v1";
+
+// Shown once, right after someone posts their first check-in -- the moment
+// the payoff is concrete ("you'll know when they reply") rather than
+// abstract. Deliberately NOT shown on arrival: installing mid-invite opens
+// a fresh signed-out app at "/" and strands the check-in they came for.
+function InstallPrompt({ onContinue }) {
+  const [prompt, setPrompt] = useState(null);
+
+  useEffect(() => {
+    const handler = (e) => { e.preventDefault(); setPrompt(e); };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const install = async () => {
+    if (!prompt) return;
+    prompt.prompt();
+    await prompt.userChoice;
+    setPrompt(null);
+    onContinue();
+  };
+
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-12 pb-10" style={{ background: "#EFE9DA" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');
+        @keyframes rbtNudge { 0%,100% { transform: translateY(0); } 50% { transform: translateY(9px); } }`}</style>
+
+      <div className="w-full flex-1 flex flex-col items-center text-center" style={{ maxWidth: "330px" }}>
+        <CheckCircle2 size={24} color="#4B5E33" style={{ marginBottom: "12px" }} />
+        <p className="text-[19px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
+          Your cards are posted
+        </p>
+        <p className="text-[13px] leading-relaxed mb-7" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif" }}>
+          Add Rose, Bud, Thorn to your home screen and you'll know the moment they write back — without signing in
+          again or waiting on a text.
+        </p>
+
+        {prompt ? (
+          <button onClick={install}
+            className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+            ADD TO HOME SCREEN
+          </button>
+        ) : (
+          <div className="w-full rounded-2xl px-5 py-4 text-left" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.14)" }}>
+            <InstallSteps compact />
+          </div>
+        )}
+
+        <button onClick={onContinue} className="mt-6 text-[11px] underline"
+          style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+          skip for now
+        </button>
+      </div>
+
+      {!prompt && isIOS() && (
+        <div className="flex flex-col items-center pb-2" style={{ animation: "rbtNudge 1.6s ease-in-out infinite" }}>
+          <p className="text-[11px] mb-1" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
+            SHARE MENU IS DOWN HERE
+          </p>
+          <span style={{ fontSize: "26px", lineHeight: 1, color: "rgba(43,42,31,0.45)" }}>↓</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Nudge on the home screen. Not a blocker -- people who
 // only want to read a friend's check-in should never be stopped by it.
 function InstallBanner() {
   const [prompt, setPrompt] = useState(null);
@@ -631,7 +700,7 @@ function InstallBanner() {
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  const install = async () => {
+  const act = async () => {
     if (!prompt) { setOpen((v) => !v); return; }
     prompt.prompt();
     await prompt.userChoice;
@@ -641,35 +710,42 @@ function InstallBanner() {
   const tooOld = isIOS() && iosPushUnsupported();
 
   return (
-    <div className="w-full rounded-xl px-3.5" style={{ background: "rgba(43,42,31,0.05)" }}>
-      <button onClick={install}
-        className="w-full flex items-center justify-between py-2.5"
-        style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Special Elite', monospace", fontSize: "12px" }}>
-        <span>{isIOS() ? "Skip signing in each time" : "Add to your phone"}</span>
-        <span style={{
-          display: "inline-block",
-          transition: "transform 0.15s ease",
-          transform: open && !prompt ? "rotate(90deg)" : "none",
-          color: "rgba(43,42,31,0.45)",
-          fontSize: "15px",
-        }}>›</span>
-      </button>
+    <div className="w-full">
+      <style>{`@keyframes rbtNudge { 0%,100% { transform: translateY(0); } 50% { transform: translateY(9px); } }`}</style>
 
-      {open && !prompt && (
-        <div className="pb-3">
-          {tooOld ? (
-            <p className="text-[12px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-              Your iPhone is running an older version of iOS. You can still add Rose, Bud, Thorn to your home screen, but
-              notifications need iOS 16.4 or newer — updating in Settings will turn them on.
-            </p>
-          ) : (
-            <p className="text-[12px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-              {isIOS()
-                ? "Links from friends open in Safari, where you're signed out every time. Add it to your home screen and you stay signed in — and check-ins arrive as notifications instead of texts."
-                : "Add it to your home screen to stay signed in, and check-ins arrive as notifications instead of texts."}
-            </p>
-          )}
-          <InstallSteps compact />
+      <div className="w-full rounded-2xl px-4 py-4" style={{ background: "#2B2A1F", color: "#EFE9DA" }}>
+        <p className="text-[13px] leading-relaxed mb-1" style={{ fontFamily: "'Permanent Marker', cursive" }}>
+          {isIOS() ? "Skip signing in each time" : "Add it to your phone"}
+        </p>
+        <p className="text-[12px] leading-relaxed mb-3" style={{ fontFamily: "'Fraunces', serif", opacity: 0.85 }}>
+          {tooOld
+            ? "You can add Rose, Bud, Thorn to your home screen for one-tap access. Notifications need iOS 16.4 or newer."
+            : isIOS()
+              ? "Links from friends open in Safari, where you're signed out every time. On your home screen you stay signed in, and check-ins arrive as notifications."
+              : "Stay signed in, and get check-ins as notifications instead of links."}
+        </p>
+
+        <button onClick={act}
+          className="w-full px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide"
+          style={{ background: "#EFE9DA", color: "#2B2A1F", fontFamily: "'Special Elite', monospace" }}>
+          {prompt ? "ADD TO HOME SCREEN" : open ? "HIDE STEPS" : "SHOW ME HOW"}
+        </button>
+
+        {open && !prompt && (
+          <div className="mt-3 rounded-xl px-4 py-3" style={{ background: "rgba(239,233,218,0.1)" }}>
+            <div style={{ filter: "invert(1) hue-rotate(180deg)" }}>
+              <InstallSteps compact />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {open && !prompt && isIOS() && (
+        <div className="flex flex-col items-center mt-4" style={{ animation: "rbtNudge 1.6s ease-in-out infinite" }}>
+          <p className="text-[11px] mb-1" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
+            SHARE MENU IS DOWN HERE
+          </p>
+          <span style={{ fontSize: "26px", lineHeight: 1, color: "rgba(43,42,31,0.45)" }}>↓</span>
         </div>
       )}
     </div>
@@ -2840,6 +2916,17 @@ export default function App() {
   };
 
   const [sendOrigin, setSendOrigin] = useState("flow");
+  const [afterInstall, setAfterInstall] = useState("send");
+
+  const shouldOfferInstall = () => {
+    if (isStandalone()) return false;
+    try { return !window.localStorage.getItem(INSTALL_PROMPTED_KEY); } catch { return true; }
+  };
+
+  const dismissInstallPrompt = () => {
+    try { window.localStorage.setItem(INSTALL_PROMPTED_KEY, "1"); } catch {}
+    setStage(afterInstall);
+  };
 
   // Re-open the send screen for a check-in you already posted.
   const sendMore = (group) => {
@@ -2925,7 +3012,13 @@ export default function App() {
 
     setGroupId(targetGroupId);
     setSaving(false);
-    setStage(joinedExisting ? "home" : "send");
+    const next = joinedExisting ? "home" : "send";
+    if (shouldOfferInstall()) {
+      setAfterInstall(next);
+      setStage("install");
+    } else {
+      setStage(next);
+    }
   };
 
   const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -2997,6 +3090,10 @@ export default function App() {
         onDisableNotifications={handleDisableNotifications}
       />
     );
+  }
+
+  if (stage === "install") {
+    return <InstallPrompt onContinue={dismissInstallPrompt} />;
   }
 
   if (stage === "kind") {
