@@ -1,8 +1,10 @@
-// Replaced with the deploy's build ID by vite.config.js at build time.
-const BUILD_ID = "__BUILD_ID__";
-const CACHE_NAME = `rose-bud-thorn-${BUILD_ID}`;
-
-/* ---------- Push notifications ---------- */
+// Home screen icon badge. Needs iOS 16.4+ and notification permission;
+// absent everywhere else, so always feature-detect.
+function setBadge(count) {
+  if (!self.navigator || !self.navigator.setAppBadge) return Promise.resolve();
+  if (count > 0) return self.navigator.setAppBadge(count).catch(() => {});
+  return self.navigator.clearAppBadge().catch(() => {});
+}
 
 self.addEventListener("push", (event) => {
   const data = event.data ? event.data.json() : {};
@@ -12,76 +14,63 @@ self.addEventListener("push", (event) => {
     icon: "/icon-192.png",
     badge: "/icon-192.png",
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+
+  event.waitUntil(
+    self.registration.showNotification(title, options).then(async () => {
+      // Badge count = how many of our notifications are still sitting
+      // undismissed. Self-maintaining, and needs nothing from the server.
+      const open = await self.registration.getNotifications();
+      await setBadge(open.length);
+    })
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(
-    clients.matchAll({ type: "window" }).then((clientList) => {
+    (async () => {
+      const open = await self.registration.getNotifications();
+      await setBadge(open.length);
+
+      const clientList = await clients.matchAll({ type: "window" });
       if (clientList.length > 0) return clientList[0].focus();
       return clients.openWindow("/");
-    })
+    })()
   );
 });
 
-/* ---------- Lifecycle: new versions take over immediately ---------- */
+// The app tells us the real unread count whenever it knows it.
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SET_BADGE") {
+    event.waitUntil(setBadge(event.data.count || 0));
+  }
+});
 
-self.addEventListener("install", () => {
+const CACHE_NAME = "rose-bud-thorn-v1";
+
+self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    )
   );
+  self.clients.claim();
 });
 
-/* ---------- Caching ---------- */
-
-function putInCache(request, response) {
-  if (response && response.ok && response.type === "basic") {
-    const clone = response.clone();
-    caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-  }
-  return response;
-}
-
 self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  if (req.method !== "GET") return;
-
-  const url = new URL(req.url);
-
-  // Only handle our own files. Supabase and other APIs go straight to the network.
-  if (url.origin !== self.location.origin) return;
-
-  // Update-check files are never cached.
-  if (url.pathname === "/version.json" || url.pathname === "/sw.js") return;
-
-  // Vite's hashed build files never change once published: serve from cache first.
-  if (url.pathname.startsWith("/assets/")) {
-    event.respondWith(
-      caches.match(req).then((hit) => hit || fetch(req).then((res) => putInCache(req, res)))
-    );
-    return;
-  }
-
-  // Pages and everything else: always try the network (skipping the HTTP cache),
-  // fall back to the last saved copy when offline.
-  const networkRequest =
-    req.mode === "navigate"
-      ? fetch(req.url, { cache: "no-store", credentials: "same-origin" })
-      : fetch(req, { cache: "no-store" });
+  if (event.request.method !== "GET") return;
 
   event.respondWith(
-    networkRequest
-      .then((res) => putInCache(req, res))
-      .catch(() =>
-        caches.match(req).then((hit) => hit || (req.mode === "navigate" ? caches.match("/") : undefined))
-      )
+    fetch(event.request)
+      .then((response) => {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
