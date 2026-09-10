@@ -1533,55 +1533,86 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
   const [checkins, setCheckins] = useState(null);
   const [profiles, setProfiles] = useState({});
   const [tab, setTab] = useState(initialTab || "inbox");
+  const [openId, setOpenId] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = async () => {
+    const { data: memberships } = await supabase
+      .from("group_members")
+      .select("group_id, last_seen_at, groups(id, created_at, expires_at, created_by, title)")
+      .eq("user_id", userId);
 
-    (async () => {
-      const { data: memberships } = await supabase
-        .from("group_members")
-        .select("group_id, groups(id, created_at, expires_at, created_by, title)")
-        .eq("user_id", userId);
+    const rows = (memberships || []).filter(
+      (m) => m.groups && new Date(m.groups.expires_at) > new Date()
+    );
+    const ids = rows.map((m) => m.group_id);
 
-      const groups = (memberships || [])
-        .map((m) => m.groups)
-        .filter((g) => g && new Date(g.expires_at) > new Date())
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (ids.length === 0) { setCheckins([]); return; }
 
-      const [withCards, { data: people }] = await Promise.all([
-        Promise.all(
-          groups.map(async (g) => {
-            const { data: cards } = await supabase
-              .from("cards")
-              .select("id, type, content, user_id, created_at")
-              .eq("group_id", g.id)
-              .order("created_at", { ascending: true });
-            return { ...g, cards: cards || [] };
-          })
-        ),
-        supabase.rpc("profiles_for_my_checkins"),
-      ]);
+    const [{ data: cards }, { data: comments }, { data: people }] = await Promise.all([
+      supabase.from("cards").select("id, group_id, type, content, user_id, created_at").in("group_id", ids),
+      supabase.from("comments").select("id, group_id, card_id, user_id, content, created_at").in("group_id", ids),
+      supabase.rpc("profiles_for_my_checkins"),
+    ]);
 
-      if (cancelled) return;
+    const byId = {};
+    (people || []).forEach((p) => { byId[p.id] = p; });
+    if (!people || people.length === 0) {
+      console.warn("profiles_for_my_checkins returned nothing - names will show as 'Friend'");
+    }
+    setProfiles(byId);
 
-      const byId = {};
-      (people || []).forEach((p) => { byId[p.id] = p; });
-      if (!people || people.length === 0) {
-        console.warn("profiles_for_my_checkins returned nothing - names will show as 'Friend'");
-      }
-      setProfiles(byId);
-      setCheckins(withCards.filter((g) => g.cards.length > 0));
-    })();
+    const built = rows
+      .map((m) => {
+        const g = m.groups;
+        const myCards = (cards || []).filter((c) => c.group_id === g.id);
+        const myComments = (comments || []).filter((c) => c.group_id === g.id);
+        const seen = m.last_seen_at ? new Date(m.last_seen_at) : null;
 
-    return () => { cancelled = true; };
-  }, [userId]);
+        // Anything from someone else since the last time this person looked.
+        const isNew = (item) =>
+          item.user_id !== userId && (!seen || new Date(item.created_at) > seen);
+
+        const unread =
+          myCards.filter(isNew).length + myComments.filter(isNew).length;
+
+        const stamps = [g.created_at, ...myCards.map((c) => c.created_at), ...myComments.map((c) => c.created_at)];
+        const lastActivity = stamps.reduce((a, b) => (new Date(b) > new Date(a) ? b : a), g.created_at);
+
+        return { ...g, cards: myCards, comments: myComments, unread, lastActivity };
+      })
+      .filter((g) => g.cards.length > 0)
+      .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
+
+    setCheckins(built);
+  };
+
+  useEffect(() => { load(); }, [userId]);
 
   const received = (checkins || []).filter((g) => g.created_by !== userId);
   const sent = (checkins || []).filter((g) => g.created_by === userId);
   const visible = tab === "inbox" ? received : sent;
+  const unreadIn = received.reduce((n, g) => n + (g.unread > 0 ? 1 : 0), 0);
 
-  // Cards arrive flat; group them by author so each person shows up once
-  // with their photo and name above their rose, bud and thorn.
+  const nameFor = (uid) =>
+    uid === userId ? "You" : (profiles[uid] && profiles[uid].display_name) || "Friend";
+
+  // Who is in this check-in, other than me.
+  const othersIn = (g) => {
+    const ids = [...new Set(g.cards.map((c) => c.user_id))].filter((id) => id !== userId);
+    return ids.length === 0 ? ["You"] : ids.map(nameFor);
+  };
+
+  const openCheckIn = async (g) => {
+    setOpenId(g.id);
+    // Mark as seen, then clear the badge locally so it doesn't linger.
+    await supabase
+      .from("group_members")
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq("group_id", g.id)
+      .eq("user_id", userId);
+    setCheckins((prev) => (prev || []).map((c) => (c.id === g.id ? { ...c, unread: 0 } : c)));
+  };
+
   const byAuthor = (cards) => {
     const order = [];
     const map = new Map();
@@ -1592,9 +1623,66 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
     return order.map((uid) => ({ userId: uid, cards: map.get(uid) }));
   };
 
-  const nameFor = (uid) =>
-    uid === userId ? "You" : (profiles[uid] && profiles[uid].display_name) || "Friend";
+  const dateLabel = (iso) =>
+    new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
+  const open = (checkins || []).find((g) => g.id === openId);
+
+  // ---------- detail ----------
+  if (open) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
+        <div className="w-full max-w-md">
+          <TopBar onHome={onBack} onProfile={onProfile} avatarUrl={profile?.avatar_url} name={profile?.display_name} />
+
+          <button onClick={() => setOpenId(null)} className="flex items-center gap-1 text-[12px] mb-5"
+            style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
+            <ChevronLeft size={14} /> ALL CHECK-INS
+          </button>
+
+          <p className="text-[10px] tracking-wide mb-5" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
+            {dateLabel(open.created_at)}{open.title ? ` · ${open.title.toUpperCase()}` : ""}
+          </p>
+
+          {open.created_by === userId && (
+            <button onClick={() => onSendMore(open)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full mb-5"
+              style={{ background: "rgba(43,42,31,0.06)", color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace", fontSize: "10px" }}>
+              <ArrowRight size={12} /> SEND TO SOMEONE ELSE
+            </button>
+          )}
+
+          {byAuthor(open.cards).map((author) => (
+            <div key={author.userId} className="mb-6">
+              <div className="flex items-center gap-2 mb-2">
+                <Avatar url={profiles[author.userId] && profiles[author.userId].avatar_url} name={nameFor(author.userId)} size={32} />
+                <span className="text-[12px]" style={{ color: "rgba(43,42,31,0.75)", fontFamily: "'Special Elite', monospace" }}>
+                  {nameFor(author.userId)}
+                </span>
+              </div>
+
+              <div style={{ paddingLeft: "42px" }}>
+                {author.cards.map((c) => (
+                  <div key={c.id} className="mb-3.5">
+                    <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
+                      {TYPE_LABELS[c.type]}
+                    </span>
+                    <p className="text-[13px] leading-snug" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
+                      {c.content}
+                    </p>
+                    <CommentThread card={c} groupId={open.id} userId={userId} profiles={profiles} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- list ----------
   return (
     <div className="min-h-screen w-full flex flex-col items-center px-5 pt-8 pb-12" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&display=swap');`}</style>
@@ -1604,7 +1692,7 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
         <div className="flex items-center gap-2 mb-6">
           <button onClick={() => setTab("inbox")} className="px-4 py-2 rounded-full text-[12px] font-bold tracking-wide"
             style={{ background: tab === "inbox" ? "#2B2A1F" : "rgba(43,42,31,0.06)", color: tab === "inbox" ? "#EFE9DA" : "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-            INBOX {received.length > 0 ? `(${received.length})` : ""}
+            INBOX {unreadIn > 0 ? `(${unreadIn})` : ""}
           </button>
           <button onClick={() => setTab("sent")} className="px-4 py-2 rounded-full text-[12px] font-bold tracking-wide"
             style={{ background: tab === "sent" ? "#2B2A1F" : "rgba(43,42,31,0.06)", color: tab === "sent" ? "#EFE9DA" : "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
@@ -1621,51 +1709,44 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
               : "Nothing here yet. Check-ins you start and send to others will show up here."}
           </p>
         ) : (
-          visible.map((g) => (
-            <div key={g.id} className="mb-7 pb-6" style={{ borderBottom: "1px solid rgba(43,42,31,0.1)" }}>
-              <p className="text-[10px] tracking-wide mb-4" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-                {new Date(g.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                {g.title ? ` · ${g.title.toUpperCase()}` : ""}
-              </p>
+          visible.map((g) => {
+            const names = othersIn(g);
+            const label = names.length > 2
+              ? `${names[0]}, ${names[1]} +${names.length - 2}`
+              : names.join(" & ");
 
-              {tab === "sent" && (
-                <button onClick={() => onSendMore(g)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full mb-4"
-                  style={{ background: "rgba(43,42,31,0.06)", color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace", fontSize: "10px" }}>
-                  <ArrowRight size={12} /> SEND TO SOMEONE ELSE
-                </button>
-              )}
+            return (
+              <button key={g.id} onClick={() => openCheckIn(g)}
+                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl mb-2 text-left"
+                style={{
+                  background: "#fff",
+                  border: g.unread > 0 ? "1px solid rgba(43,42,31,0.35)" : "1px solid rgba(43,42,31,0.12)",
+                }}>
+                <Avatar
+                  url={profiles[g.cards.find((c) => c.user_id !== userId)?.user_id]?.avatar_url}
+                  name={names[0]}
+                  size={38}
+                />
 
-              {byAuthor(g.cards).map((author) => (
-                <div key={author.userId} className="mb-5">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Avatar
-                      url={profiles[author.userId] && profiles[author.userId].avatar_url}
-                      name={nameFor(author.userId)}
-                      size={32}
-                    />
-                    <span className="text-[12px]" style={{ color: "rgba(43,42,31,0.75)", fontFamily: "'Special Elite', monospace" }}>
-                      {nameFor(author.userId)}
-                    </span>
-                  </div>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[14px] truncate" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif", fontWeight: g.unread > 0 ? 600 : 500 }}>
+                    {label}
+                  </span>
+                  <span className="block text-[11px] truncate" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
+                    {dateLabel(g.created_at)}{g.title ? ` · ${g.title}` : ""}
+                  </span>
+                </span>
 
-                  <div style={{ paddingLeft: "42px" }}>
-                    {author.cards.map((c, i) => (
-                      <div key={c.id || i} className="mb-3.5">
-                        <span className="text-[9px] tracking-[0.15em] font-bold" style={{ color: TYPE_INK[c.type] }}>
-                          {TYPE_LABELS[c.type]}
-                        </span>
-                        <p className="text-[13px] leading-snug" style={{ color: "#2B2A1F", fontFamily: "'Fraunces', serif" }}>
-                          {c.content}
-                        </p>
-                        <CommentThread card={c} groupId={g.id} userId={userId} profiles={profiles} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))
+                {g.unread > 0 && (
+                  <span className="shrink-0 min-w-[20px] h-[20px] px-1.5 rounded-full flex items-center justify-center text-[10px]"
+                    style={{ background: "#8C2F45", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+                    {g.unread}
+                  </span>
+                )}
+                <ChevronRight size={15} color="rgba(43,42,31,0.3)" />
+              </button>
+            );
+          })
         )}
       </div>
     </div>
