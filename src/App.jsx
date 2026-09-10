@@ -875,6 +875,9 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
       ]);
       const byId = {};
       (people || []).forEach((p) => { byId[p.id] = p; });
+      if (!people || people.length === 0) {
+        console.warn("profiles_for_my_checkins returned nothing - names will show as 'Friend'");
+      }
       setProfiles(byId);
       setContacts(cs || []);
       setGroups(gs || []);
@@ -1563,6 +1566,9 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
 
       const byId = {};
       (people || []).forEach((p) => { byId[p.id] = p; });
+      if (!people || people.length === 0) {
+        console.warn("profiles_for_my_checkins returned nothing - names will show as 'Friend'");
+      }
       setProfiles(byId);
       setCheckins(withCards.filter((g) => g.cards.length > 0));
     })();
