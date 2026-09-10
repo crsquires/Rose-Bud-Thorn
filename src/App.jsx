@@ -566,6 +566,18 @@ function iosPushUnsupported() {
   return v.major < 16 || (v.major === 16 && v.minor < 4);
 }
 
+// Chrome on Android supports this. Safari has it behind an off-by-default
+// experimental flag, so hand entry has to stay as the fallback.
+const CONTACT_PICKER_SUPPORTED =
+  typeof navigator !== "undefined" && "contacts" in navigator && "ContactsManager" in window;
+
+// Last 10 digits, so "(512) 555-0134" and "+15125550134" are the same person.
+function phoneKey(phone) {
+  if (!phone) return null;
+  const digits = String(phone).replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits || null;
+}
+
 function isIOS() {
   if (typeof navigator === "undefined") return false;
   return /iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -886,6 +898,10 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
   const [editGroup, setEditGroup] = useState(null);       // group id, or "new"
   const [groupName, setGroupName] = useState("");
   const [groupPicks, setGroupPicks] = useState([]);
+  const [addingByHand, setAddingByHand] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [importing, setImporting] = useState(false);
   const needsInstall = isIOS() && !isStandalone();
 
   const dirty = name.trim() !== (profile?.display_name || "") && name.trim().length > 0;
@@ -1040,6 +1056,54 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
     }
   };
 
+  const addByHand = async () => {
+    if (!newName.trim()) return;
+    setError(null);
+    const { error: err } = await supabase.from("contacts").insert({
+      owner_id: userId,
+      name: newName.trim(),
+      phone: newPhone.trim() || null,
+    });
+    if (err) { setError(err.message); return; }
+    setNewName(""); setNewPhone(""); setAddingByHand(false);
+    setNotice("Added. They'll get a text when you send to them.");
+    loadPeople();
+  };
+
+  // Android Chrome only -- Safari has no address book API at all.
+  const importFromPhone = async () => {
+    setError(null);
+    setNotice(null);
+    setImporting(true);
+    try {
+      const available = await navigator.contacts.getProperties();
+      const wanted = ["name", "tel"].filter((p) => available.includes(p));
+      const picked = await navigator.contacts.select(wanted, { multiple: true });
+      if (!picked || picked.length === 0) return;
+
+      const seen = new Set((contacts || []).map((c) => phoneKey(c.phone)).filter(Boolean));
+      const rows = [];
+      for (const p of picked) {
+        const phone = (p.tel && p.tel[0]) || null;
+        const key = phoneKey(phone);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        rows.push({ owner_id: userId, name: (p.name && p.name[0]) || phone, phone });
+      }
+
+      if (rows.length === 0) { setNotice("Already saved, or no phone numbers on those."); return; }
+
+      const { error: err } = await supabase.from("contacts").insert(rows);
+      if (err) { setError(err.message); return; }
+      setNotice(`Added ${rows.length}.`);
+      loadPeople();
+    } catch {
+      setError("Couldn't open your contacts. You can still add someone by hand.");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const togglePick = (id) =>
     setGroupPicks((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
@@ -1136,11 +1200,40 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
         {/* ---------- people ---------- */}
         <div className="flex items-center justify-between mt-9 mb-3">
           <p className="text-[10px] tracking-[0.2em]" style={heading}>PEOPLE</p>
-          <button onClick={inviteSomeone} className="text-[11px] underline"
-            style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
-            invite someone
-          </button>
+          <div className="flex items-center gap-3">
+            {CONTACT_PICKER_SUPPORTED && (
+              <button onClick={importFromPhone} disabled={importing} className="text-[11px] underline disabled:opacity-40"
+                style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
+                {importing ? "opening…" : "from contacts"}
+              </button>
+            )}
+            <button onClick={() => setAddingByHand((v) => !v)} className="text-[11px] underline"
+              style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
+              add by hand
+            </button>
+            <button onClick={inviteSomeone} className="text-[11px] underline"
+              style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
+              invite
+            </button>
+          </div>
         </div>
+
+        {addingByHand && (
+          <div className="mb-4">
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name" maxLength={40}
+              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2" style={pill} />
+            <input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Phone number" type="tel"
+              className="w-full px-4 py-3 rounded-full text-[13px] outline-none mb-2" style={pill} />
+            <button onClick={addByHand} disabled={!newName.trim()}
+              className="w-full px-4 py-2.5 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+              SAVE CONTACT
+            </button>
+            <p className="text-[11px] leading-relaxed mt-2" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif" }}>
+              With a number saved you can put them in a group now — they'll get a text invite when you send.
+            </p>
+          </div>
+        )}
 
         {contacts === null ? (
           <p className="text-[12px]" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}>Loading…</p>
