@@ -261,6 +261,44 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
 }
 
+// The browser won't let us revoke the permission itself, but unsubscribing
+// and deleting the row means nothing can be delivered -- which is what the
+// person actually means by "off". Re-enabling later won't re-prompt.
+async function disablePushNotifications(userId) {
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+
+    if (subscription) {
+      const endpoint = subscription.endpoint;
+      await subscription.unsubscribe();
+      await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint);
+    } else {
+      // No live subscription, but clear any stale rows for this device's user.
+      await supabase.from("push_subscriptions").delete().eq("user_id", userId);
+    }
+
+    await updateAppBadge(0);
+    return { error: null };
+  } catch (err) {
+    return { error: err.message || "Couldn't turn notifications off." };
+  }
+}
+
+// True only if permission is granted AND a live subscription exists -- after
+// turning them off, permission stays granted, so permission alone would lie.
+async function pushIsActive() {
+  try {
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return false;
+    if (!("serviceWorker" in navigator)) return false;
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    return !!subscription;
+  } catch {
+    return false;
+  }
+}
+
 async function enablePushNotifications(userId) {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
     return { error: "Push notifications aren't supported on this browser." };
@@ -444,6 +482,22 @@ function iosPushUnsupported() {
   const v = iosVersion();
   if (!v) return false;
   return v.major < 16 || (v.major === 16 && v.minor < 4);
+}
+
+// Sets the number on the home screen icon. Only exists for installed web
+// apps on iOS 16.4+ and Chromium desktop, so feature-detect every time.
+async function updateAppBadge(count) {
+  try {
+    if ("setAppBadge" in navigator) {
+      if (count > 0) await navigator.setAppBadge(count);
+      else await navigator.clearAppBadge();
+    }
+    // Also tell the service worker, so the count survives the app closing.
+    const reg = await navigator.serviceWorker?.ready;
+    reg?.active?.postMessage({ type: "SET_BADGE", count });
+  } catch {
+    // Unsupported or permission not granted -- nothing to do.
+  }
 }
 
 function isIOS() {
@@ -751,7 +805,7 @@ function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave,
   );
 }
 
-function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifStatus, onEnableNotifications }) {
+function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifStatus, onEnableNotifications, onDisableNotifications }) {
   const [name, setName] = useState(profile?.display_name || "");
   const [savingName, setSavingName] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -975,9 +1029,10 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
             <span className="text-[13px]">Check-in alerts</span>
           </div>
           {notifStatus === "enabled" ? (
-            <span className="flex items-center gap-1 text-[11px]" style={{ color: "#4B5E33" }}>
-              <CheckCircle2 size={13} /> ON
-            </span>
+            <button onClick={onDisableNotifications} className="flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-full"
+              style={{ background: "rgba(75,94,51,0.12)", color: "#4B5E33", fontFamily: "'Special Elite', monospace" }}>
+              <CheckCircle2 size={13} /> ON — TURN OFF
+            </button>
           ) : needsInstall ? (
             <span className="text-[10px]" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
               NEEDS INSTALL
@@ -1833,7 +1888,7 @@ function CommentThread({ card, groupId, userId, profiles }) {
   );
 }
 
-function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTab }) {
+function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTab, onUnreadChange }) {
   const [checkins, setCheckins] = useState(null);
   const [profiles, setProfiles] = useState({});
   const [tab, setTab] = useState(initialTab || "inbox");
@@ -1894,6 +1949,10 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
       .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
 
     setCheckins(built);
+
+    const totalUnread = built.reduce((n, g) => n + g.unread, 0);
+    updateAppBadge(totalUnread);
+    if (onUnreadChange) onUnreadChange(totalUnread);
   };
 
   useEffect(() => { load(); }, [userId]);
@@ -1922,7 +1981,13 @@ function InboxScreen({ userId, profile, onBack, onProfile, onSendMore, initialTa
       .update({ last_seen_at: new Date().toISOString() })
       .eq("group_id", g.id)
       .eq("user_id", userId);
-    setCheckins((prev) => (prev || []).map((c) => (c.id === g.id ? { ...c, unread: 0 } : c)));
+    setCheckins((prev) => {
+      const next = (prev || []).map((c) => (c.id === g.id ? { ...c, unread: 0 } : c));
+      const totalUnread = next.reduce((n, x) => n + x.unread, 0);
+      updateAppBadge(totalUnread);
+      if (onUnreadChange) onUnreadChange(totalUnread);
+      return next;
+    });
   };
 
   const byAuthor = (cards) => {
@@ -2202,9 +2267,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [joinError, setJoinError] = useState(null);
-  const [notifStatus, setNotifStatus] = useState(() =>
-    typeof Notification !== "undefined" && Notification.permission === "granted" ? "enabled" : "idle"
-  );
+  const [notifStatus, setNotifStatus] = useState("idle");
   const [showPrimer, setShowPrimer] = useState(false);
   const [profile, setProfile] = useState(undefined);
   const [checkInTitle, setCheckInTitle] = useState(null);
@@ -2388,6 +2451,44 @@ export default function App() {
     setProfile((p) => ({ ...(p || { id: session.user.id }), display_name: value }));
   };
 
+  // Refresh the icon badge on load, so it is correct even for someone who
+  // opens the app and never taps through to the inbox.
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+
+    (async () => {
+      const { data: memberships } = await supabase
+        .from("group_members")
+        .select("group_id, last_seen_at, groups(id, expires_at)")
+        .eq("user_id", session.user.id);
+
+      const live = (memberships || []).filter(
+        (m) => m.groups && new Date(m.groups.expires_at) > new Date()
+      );
+      if (live.length === 0) { if (!cancelled) updateAppBadge(0); return; }
+
+      const ids = live.map((m) => m.group_id);
+      const [{ data: cards }, { data: comments }] = await Promise.all([
+        supabase.from("cards").select("group_id, user_id, created_at").in("group_id", ids),
+        supabase.from("comments").select("group_id, user_id, created_at").in("group_id", ids),
+      ]);
+
+      const count = live.reduce((n, m) => {
+        const seen = m.last_seen_at ? new Date(m.last_seen_at) : null;
+        const isNew = (x) =>
+          x.group_id === m.group_id &&
+          x.user_id !== session.user.id &&
+          (!seen || new Date(x.created_at) > seen);
+        return n + (cards || []).filter(isNew).length + (comments || []).filter(isNew).length;
+      }, 0);
+
+      if (!cancelled) updateAppBadge(count);
+    })();
+
+    return () => { cancelled = true; };
+  }, [session, stage]);
+
   // First open after sign-in: ask about notifications once, and only once.
   // Skipping is remembered, and the toggle always lives on the profile.
   useEffect(() => {
@@ -2404,6 +2505,21 @@ export default function App() {
   };
 
   const filledCount = Object.values(cardEntries).filter((v) => v.trim().length > 0).length;
+
+  // Permission alone isn't the answer -- check for a live subscription.
+  useEffect(() => {
+    let cancelled = false;
+    pushIsActive().then((active) => {
+      if (!cancelled && active) setNotifStatus("enabled");
+    });
+    return () => { cancelled = true; };
+  }, [session]);
+
+  const handleDisableNotifications = async () => {
+    const { error } = await disablePushNotifications(session.user.id);
+    if (error) { setNotifStatus("error"); return; }
+    setNotifStatus("idle");
+  };
 
   const handleEnableNotifications = async () => {
     const { error } = await enablePushNotifications(session.user.id);
@@ -2587,6 +2703,7 @@ export default function App() {
         onBack={() => setStage("home")}
         notifStatus={notifStatus}
         onEnableNotifications={handleEnableNotifications}
+        onDisableNotifications={handleDisableNotifications}
       />
     );
   }
