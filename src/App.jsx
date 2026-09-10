@@ -846,7 +846,20 @@ function NameStep({ initialName, onSave, saving, error }) {
   );
 }
 
-function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave, onRemove }) {
+function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave, onRemove, onAddPerson }) {
+  const [adding, setAdding] = useState(false);
+  const [pName, setPName] = useState("");
+  const [pPhone, setPPhone] = useState("");
+
+  const add = async () => {
+    if (!pName.trim()) return;
+    const created = await onAddPerson(pName.trim(), pPhone.trim());
+    if (created) {
+      togglePick(created.id);   // tick them straight into this group
+      setPName(""); setPPhone(""); setAdding(false);
+    }
+  };
+
   return (
     <div className="px-1 pt-2 pb-1">
       <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40}
@@ -865,6 +878,25 @@ function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave,
           </button>
         );
       })}
+
+      {adding ? (
+        <div className="mb-2">
+          <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="Name" maxLength={40}
+            className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-2" style={pill} />
+          <input value={pPhone} onChange={(e) => setPPhone(e.target.value)} placeholder="Phone number" type="tel"
+            className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-2" style={pill} />
+          <button onClick={add} disabled={!pName.trim()}
+            className="w-full px-3 py-2 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-40"
+            style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+            ADD TO GROUP
+          </button>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)} className="text-[11px] underline mb-2"
+          style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
+          + someone not on this list
+        </button>
+      )}
 
       <div className="flex gap-2 mt-2">
         <button onClick={onSave} disabled={!name.trim() || picks.length === 0}
@@ -902,6 +934,8 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [importing, setImporting] = useState(false);
+  const [showPeople, setShowPeople] = useState(false);
+  const [showGroups, setShowGroups] = useState(false);
   const needsInstall = isIOS() && !isStandalone();
 
   const dirty = name.trim() !== (profile?.display_name || "") && name.trim().length > 0;
@@ -1104,6 +1138,20 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
     }
   };
 
+  // Used by the group editor: create the person, return them so they can be
+  // ticked into the group immediately.
+  const addPersonForGroup = async (personName, personPhone) => {
+    setError(null);
+    const { data, error: err } = await supabase
+      .from("contacts")
+      .insert({ owner_id: userId, name: personName, phone: personPhone || null })
+      .select()
+      .single();
+    if (err) { setError(err.message); return null; }
+    await loadPeople();
+    return data;
+  };
+
   const togglePick = (id) =>
     setGroupPicks((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
@@ -1199,8 +1247,19 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
 
         {/* ---------- people ---------- */}
         <div className="flex items-center justify-between mt-9 mb-3">
-          <p className="text-[10px] tracking-[0.2em]" style={heading}>PEOPLE</p>
-          <div className="flex items-center gap-3">
+          <button onClick={() => setShowPeople((v) => !v)} className="flex items-center gap-2">
+            <p className="text-[10px] tracking-[0.2em]" style={heading}>
+              PEOPLE {contacts ? `(${contacts.length})` : ""}
+            </p>
+            <span style={{
+              display: "inline-block",
+              transition: "transform 0.15s ease",
+              transform: showPeople ? "rotate(90deg)" : "none",
+              color: "rgba(43,42,31,0.4)",
+              fontSize: "15px",
+            }}>›</span>
+          </button>
+          <div className="flex items-center gap-3" style={{ display: showPeople ? "flex" : "none" }}>
             {CONTACT_PICKER_SUPPORTED && (
               <button onClick={importFromPhone} disabled={importing} className="text-[11px] underline disabled:opacity-40"
                 style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
@@ -1218,6 +1277,7 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
           </div>
         </div>
 
+        <div style={{ display: showPeople ? "block" : "none" }}>
         {addingByHand && (
           <div className="mb-4">
             <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name" maxLength={40}
@@ -1277,15 +1337,30 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
           ))
         )}
 
+        </div>
+
         {/* ---------- groups ---------- */}
         <div className="flex items-center justify-between mt-9 mb-3">
-          <p className="text-[10px] tracking-[0.2em]" style={heading}>GROUPS</p>
-          <button onClick={() => openGroup("new")} disabled={!contacts || contacts.length === 0}
+          <button onClick={() => setShowGroups((v) => !v)} className="flex items-center gap-2">
+            <p className="text-[10px] tracking-[0.2em]" style={heading}>
+              GROUPS {groups.length > 0 ? `(${groups.length})` : ""}
+            </p>
+            <span style={{
+              display: "inline-block",
+              transition: "transform 0.15s ease",
+              transform: showGroups ? "rotate(90deg)" : "none",
+              color: "rgba(43,42,31,0.4)",
+              fontSize: "15px",
+            }}>›</span>
+          </button>
+          <button onClick={() => { setShowGroups(true); openGroup("new"); }} disabled={!contacts || contacts.length === 0}
             className="text-[11px] underline disabled:opacity-30"
             style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
             new group
           </button>
         </div>
+
+        <div style={{ display: showGroups ? "block" : "none" }}>
 
         {groups.length === 0 && editGroup !== "new" && (
           <p className="text-[12px] leading-relaxed" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
@@ -1313,6 +1388,7 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
                 togglePick={togglePick}
                 onSave={saveGroup}
                 onRemove={() => removeGroup(g)}
+                onAddPerson={addPersonForGroup}
               />
             )}
           </div>
@@ -1328,8 +1404,11 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
             togglePick={togglePick}
             onSave={saveGroup}
             onRemove={null}
+            onAddPerson={addPersonForGroup}
           />
         )}
+
+        </div>
 
         {notice && <p className="text-[11px] mt-6" style={{ color: "#4B5E33", fontFamily: "'Fraunces', serif" }}>{notice}</p>}
         {error && <p className="text-[12px] mt-6" style={{ color: "#8C2F45", fontFamily: "'Fraunces', serif" }}>{error}</p>}
@@ -1435,8 +1514,22 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
 
     try {
       const chosen = (contacts || []).filter((c) => picked.includes(c.id));
-      const linked = chosen.filter((c) => c.linked_user_id);
-      const unlinked = chosen.filter((c) => !c.linked_user_id);
+
+      // "On the app" isn't the same as "can receive a push" -- on iPhone
+      // that needs the app installed to the home screen. Anyone who can't
+      // be pushed gets a text instead, so nobody is silently skipped.
+      const linkedIds = chosen.filter((c) => c.linked_user_id).map((c) => c.linked_user_id);
+      let pushable = new Set();
+      if (linkedIds.length > 0) {
+        const { data: reach, error: reachErr } = await supabase.rpc("contacts_reachable_by_push", {
+          p_user_ids: linkedIds,
+        });
+        if (reachErr) console.warn("push reachability check failed:", reachErr.message);
+        pushable = new Set((reach || []).map((r) => r.user_id));
+      }
+
+      const linked = chosen.filter((c) => c.linked_user_id && pushable.has(c.linked_user_id));
+      const unlinked = chosen.filter((c) => !c.linked_user_id || !pushable.has(c.linked_user_id));
 
       // 1. People already on the app: drop them straight into this
       //    check-in and push them. No text, no tapping.
@@ -1576,7 +1669,8 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
           )}
           {result.skipped > 0 && (
             <p className="mb-2" style={{ color: "#8C2F45" }}>
-              {result.skipped} {result.skipped === 1 ? "contact has" : "contacts have"} no phone number saved, so we couldn't reach them.
+              {result.skipped} {result.skipped === 1 ? "person has" : "people have"} notifications off and no phone number saved,
+              so there was no way to reach them. Add a number on your profile and they'll get a text next time.
             </p>
           )}
         </div>
