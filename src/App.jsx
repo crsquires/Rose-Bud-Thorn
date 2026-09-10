@@ -288,15 +288,10 @@ async function enablePushNotifications(userId) {
 }
 
 function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, onOpenInbox, onOpenProfile, saveError }) {
-  const [showInstall, setShowInstall] = useState(() => {
-    if (isStandalone()) return false;
-    try { return !window.localStorage.getItem(INSTALL_DISMISSED_KEY); } catch { return true; }
-  });
-
-  const dismissInstall = () => {
-    try { window.localStorage.setItem(INSTALL_DISMISSED_KEY, "1"); } catch {}
-    setShowInstall(false);
-  };
+  // Shown until the app is actually installed, then it stops rendering on
+  // its own. No dismiss flag -- a permanent one meant a single tap could
+  // cost someone notifications forever.
+  const showInstall = !isStandalone();
 
   const cardsDone = filledCount >= 3;
   const inboxDone = waitingCount === 0 && readCount > 0;
@@ -381,12 +376,6 @@ function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, 
           Rose, Bud, Thorn is a simple way to connect with people in your life
         </p>
 
-        {showInstall && (
-          <div className="mx-auto w-full" style={{ maxWidth: "300px" }}>
-            <InstallBanner onDismiss={dismissInstall} />
-          </div>
-        )}
-
         {/* One grid for all three rows, so a wrapped description hangs under
             the description above it rather than under the label. */}
         <div className="mt-5 mx-auto" style={{
@@ -419,6 +408,12 @@ function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, 
           Messages automatically deleted after 24 hours.
         </p>
 
+        {showInstall && (
+          <div className="mx-auto w-full mt-7" style={{ maxWidth: "300px" }}>
+            <InstallBanner />
+          </div>
+        )}
+
         </div>
       </div>
     </div>
@@ -426,7 +421,6 @@ function DeskHome({ filledCount, waitingCount, readCount, profile, onOpenCards, 
 }
 
 const NOTIF_ASKED_KEY = "rbt_notif_asked_v1";
-const INSTALL_DISMISSED_KEY = "rbt_install_dismissed_v1";
 
 // Already added to the home screen? Then it launches without browser chrome.
 function isStandalone() {
@@ -435,6 +429,20 @@ function isStandalone() {
     window.matchMedia("(display-mode: standalone)").matches ||
     window.navigator.standalone === true
   );
+}
+
+// Web push on iPhone needs 16.4+. Below that, installing changes nothing,
+// so telling someone to install would be a wasted trip.
+function iosVersion() {
+  if (typeof navigator === "undefined") return null;
+  const m = navigator.userAgent.match(/OS (\d+)_(\d+)/);
+  return m ? { major: Number(m[1]), minor: Number(m[2]) } : null;
+}
+
+function iosPushUnsupported() {
+  const v = iosVersion();
+  if (!v) return false;
+  return v.major < 16 || (v.major === 16 && v.minor < 4);
 }
 
 function isIOS() {
@@ -480,9 +488,9 @@ function InstallSteps({ compact }) {
 
 // Quiet, dismissible nudge on the home screen. Not a blocker -- people who
 // only want to read a friend's check-in should never be stopped by it.
-function InstallBanner({ onDismiss }) {
+function InstallBanner() {
   const [prompt, setPrompt] = useState(null);
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const handler = (e) => { e.preventDefault(); setPrompt(e); };
@@ -491,44 +499,49 @@ function InstallBanner({ onDismiss }) {
   }, []);
 
   const install = async () => {
-    if (!prompt) { setExpanded((v) => !v); return; }
+    if (!prompt) { setOpen((v) => !v); return; }
     prompt.prompt();
     await prompt.userChoice;
     setPrompt(null);
-    onDismiss();
   };
 
-  return (
-    <div className="w-full rounded-2xl px-4 py-3 mt-5"
-      style={{ background: "rgba(43,42,31,0.05)", border: "1px solid rgba(43,42,31,0.1)" }}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1">
-          <p className="text-[12px] leading-relaxed" style={{ color: "rgba(43,42,31,0.75)", fontFamily: "'Fraunces', serif" }}>
-            Add Rose, Bud, Thorn to your home screen so you get reminders and check-ins from friends.
-          </p>
-          <button onClick={install} className="text-[11px] underline mt-1.5"
-            style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Special Elite', monospace" }}>
-            {prompt ? "install" : expanded ? "hide" : "how"}
-          </button>
-        </div>
-        <button onClick={onDismiss} className="shrink-0 text-[11px] px-2"
-          style={{ color: "rgba(43,42,31,0.4)", fontFamily: "'Special Elite', monospace" }}>
-          ✕
-        </button>
-      </div>
+  const tooOld = isIOS() && iosPushUnsupported();
 
-      {expanded && !prompt && (
-        <div className="mt-3">
+  return (
+    <div className="w-full rounded-xl px-3.5" style={{ background: "rgba(43,42,31,0.05)" }}>
+      <button onClick={install}
+        className="w-full flex items-center justify-between py-2.5"
+        style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Special Elite', monospace", fontSize: "12px" }}>
+        <span>Add to your phone</span>
+        <span style={{
+          display: "inline-block",
+          transition: "transform 0.15s ease",
+          transform: open && !prompt ? "rotate(90deg)" : "none",
+          color: "rgba(43,42,31,0.45)",
+          fontSize: "15px",
+        }}>›</span>
+      </button>
+
+      {open && !prompt && (
+        <div className="pb-3">
+          {tooOld ? (
+            <p className="text-[12px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
+              Your iPhone is running an older version of iOS. You can still add Rose, Bud, Thorn to your home screen, but
+              notifications need iOS 16.4 or newer — updating in Settings will turn them on.
+            </p>
+          ) : (
+            <p className="text-[12px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
+              {isIOS()
+                ? "Texted links always open in Safari, signed out. Install it and check-ins arrive as notifications instead."
+                : "Install it and check-ins arrive as notifications instead of links."}
+            </p>
+          )}
           <InstallSteps compact />
-          <p className="text-[11px] leading-relaxed mt-3" style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Fraunces', serif" }}>
-            You'll sign in once more inside the app — the installed version keeps its own session.
-          </p>
         </div>
       )}
     </div>
   );
 }
-
 
 function NotificationPrimer({ onEnable, onSkip, status }) {
   // Safari blocks the permission prompt outright in a browser tab.
@@ -557,10 +570,19 @@ function NotificationPrimer({ onEnable, onSkip, status }) {
       <div className="w-full" style={{ maxWidth: "300px" }}>
         {needsInstall ? (
           <>
-            <p className="text-[12px] leading-relaxed mb-4" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif" }}>
-              On iPhone, notifications only work once the app is on your home screen:
-            </p>
-            <InstallSteps compact />
+            {iosPushUnsupported() ? (
+              <p className="text-[12px] leading-relaxed mb-4" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif" }}>
+                Notifications need iOS 16.4 or newer, and this iPhone is on an older version. You can update in
+                Settings › General › Software Update, then turn them on here.
+              </p>
+            ) : (
+              <>
+                <p className="text-[12px] leading-relaxed mb-4" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif" }}>
+                  On iPhone, notifications only work once the app is on your home screen:
+                </p>
+                <InstallSteps compact />
+              </>
+            )}
             <button onClick={onSkip} className="w-full mt-6 text-[11px] underline"
               style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
               continue without notifications
@@ -798,10 +820,19 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
         </div>
         {needsInstall && notifStatus !== "enabled" && (
           <div className="mt-2 mb-2">
-            <p className="text-[12px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
-              iPhone only allows notifications for apps on your home screen:
-            </p>
-            <InstallSteps compact />
+            {iosPushUnsupported() ? (
+              <p className="text-[12px] leading-relaxed" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
+                Notifications need iOS 16.4 or newer. Update in Settings › General › Software Update, then add the app
+                to your home screen.
+              </p>
+            ) : (
+              <>
+                <p className="text-[12px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.65)", fontFamily: "'Fraunces', serif" }}>
+                  iPhone only allows notifications for apps on your home screen:
+                </p>
+                <InstallSteps compact />
+              </>
+            )}
           </div>
         )}
         {notifStatus === "error" && !needsInstall && (
@@ -875,9 +906,6 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
       ]);
       const byId = {};
       (people || []).forEach((p) => { byId[p.id] = p; });
-      if (!people || people.length === 0) {
-        console.warn("profiles_for_my_checkins returned nothing - names will show as 'Friend'");
-      }
       setProfiles(byId);
       setContacts(cs || []);
       setGroups(gs || []);
