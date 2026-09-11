@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail,
 import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
 import { setUnreadCount, clearDeliveredNotifications } from "./badge.js";
 import { STAMP_IMG, WORD_IMG } from "./assets";
+import { QRCodeSVG } from "qrcode.react";
 
 function hexToRgba(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
@@ -2644,8 +2645,23 @@ function AuthScreen({ invite }) {
 }
 
 function DesktopBlockScreen() {
+  const [copied, setCopied] = useState(false);
+  // Encode the full current URL, not just the site root, so an /invite/... link
+  // opened on a laptop carries the invite through to the phone that scans it.
+  const url = window.location.href;
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can be blocked; the QR still works, so fail quietly.
+    }
+  };
+
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 text-center" style={{ background: "#EFE9DA" }}>
+    <div className="min-h-screen w-full flex flex-col items-center justify-center px-6 py-10 text-center" style={{ background: "#EFE9DA" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Permanent+Marker&display=swap');`}</style>
       <div className="flex items-center justify-center gap-1 mb-6 w-full mx-auto" style={{ maxWidth: "300px" }}>
         <img src={WORD_IMG.rose} alt="Rose" style={{ width: "30%", height: "auto", transform: "rotate(-6deg)" }} />
@@ -2655,9 +2671,28 @@ function DesktopBlockScreen() {
       <p className="text-[16px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.75), fontFamily: "'Permanent Marker', cursive" }}>
         This one's meant for your phone
       </p>
-      <p className="text-[13px] leading-relaxed" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif", maxWidth: "300px" }}>
-        Rose, Bud, Thorn is built for quick daily check-ins on the go. Open this page on your phone to get started.
+      <p className="text-[13px] leading-relaxed mb-7" style={{ color: "rgba(43,42,31,0.6)", fontFamily: "'Fraunces', serif", maxWidth: "300px" }}>
+        Rose, Bud, Thorn is built for quick daily check-ins on the go. Point your phone's camera at this code to open it there.
       </p>
+      <div
+        className="p-4 rounded-sm"
+        style={{
+          background: "#FBF8F0",
+          border: "1px solid rgba(43,42,31,0.12)",
+          boxShadow: "0 1px 2px rgba(43,42,31,0.06), 0 8px 24px rgba(43,42,31,0.08)",
+          transform: "rotate(-1.5deg)",
+        }}
+      >
+        <QRCodeSVG value={url} size={168} bgColor="#FBF8F0" fgColor={ENTRY_INK} level="M" />
+      </div>
+      <button
+        type="button"
+        onClick={copyLink}
+        className="text-[12px] underline mt-7"
+        style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Fraunces', serif" }}
+      >
+        {copied ? "Link copied" : "Or copy the link to send to yourself"}
+      </button>
     </div>
   );
 }
