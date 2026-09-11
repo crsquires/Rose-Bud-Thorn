@@ -36,10 +36,24 @@ async function apply() {
   }
 }
 
-// Called by the inbox and on app load.
+// Called by the inbox and on app load. The app is the source of truth for
+// the badge: the service worker only guesses from how many notifications are
+// still on screen, which drifts as soon as check-ins are read or expire.
 export function setUnreadCount(n) {
   unreadCount = Number.isFinite(n) ? n : 0;
   return apply();
+}
+
+// Clears notifications the person has effectively already dealt with by
+// opening the app, so they can't keep inflating the badge.
+export async function clearDeliveredNotifications() {
+  try {
+    const reg = await navigator.serviceWorker?.ready;
+    const shown = await reg?.getNotifications?.();
+    (shown || []).forEach((n) => n.close());
+  } catch {
+    // No service worker, or not supported. Nothing to clear.
+  }
 }
 
 // Called by the update banner when a new build is published, and again with
