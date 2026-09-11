@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { ChevronLeft, ChevronRight, ArrowRight, Inbox, CheckCircle2, Home, Mail, LogOut, Bell, Check, Users, Camera, MessageCircle } from "lucide-react";
 import { supabase, signInWithEmail, signInWithGoogle, signOut } from "./lib/supabase";
-import { setUnreadCount } from "./badge.js";
+import { setUnreadCount, clearDeliveredNotifications } from "./badge.js";
 import { STAMP_IMG, WORD_IMG } from "./assets";
 
 function hexToRgba(hex, alpha) {
@@ -970,17 +970,22 @@ function NameStep({ initialName, onSave, saving, error }) {
   );
 }
 
-function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave, onRemove, onAddPerson }) {
+function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave, onRemove, onInvitePerson }) {
   const [adding, setAdding] = useState(false);
   const [pName, setPName] = useState("");
-  const [pPhone, setPPhone] = useState("");
+  const [inviting, setInviting] = useState(false);
 
+  // Reserves a slot in the group and hands the link to the share sheet, where
+  // the person is picked from the real address book. When they accept, the
+  // slot becomes them -- no typing their name or number.
   const add = async () => {
-    if (!pName.trim()) return;
-    const created = await onAddPerson(pName.trim(), pPhone.trim());
+    setInviting(true);
+    const created = await onInvitePerson(pName.trim() || "Invited");
+    setInviting(false);
     if (created) {
-      togglePick(created.id);   // tick them straight into this group
-      setPName(""); setPPhone(""); setAdding(false);
+      togglePick(created.id);
+      setPName("");
+      setAdding(false);
     }
   };
 
@@ -1005,20 +1010,21 @@ function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave,
 
       {adding ? (
         <div className="mb-2">
-          <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="Name" maxLength={40}
+          <p className="text-[11px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
+            Optional — a name just helps you recognise the slot until they join.
+          </p>
+          <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder='Label, e.g. "Tand"' maxLength={40}
             className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-2" style={pill} />
-          <input value={pPhone} onChange={(e) => setPPhone(e.target.value)} placeholder="Phone number" type="tel"
-            className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-2" style={pill} />
-          <button onClick={add} disabled={!pName.trim()}
-            className="w-full px-3 py-2 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-40"
+          <button onClick={add} disabled={inviting}
+            className="w-full px-3 py-2 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-50"
             style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-            ADD TO GROUP
+            {inviting ? "OPENING…" : "PICK THEM IN MESSAGES"}
           </button>
         </div>
       ) : (
         <button onClick={() => setAdding(true)} className="text-[11px] underline mb-2"
           style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Special Elite', monospace" }}>
-          + someone not on this list
+          + invite someone into this group
         </button>
       )}
 
@@ -1268,18 +1274,39 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
     }
   };
 
-  // Used by the group editor: create the person, return them so they can be
-  // ticked into the group immediately.
-  const addPersonForGroup = async (personName, personPhone) => {
+  // Reserve a slot in a group and share an invite for it. Whoever opens the
+  // link fills that slot -- connect_on_join replaces the placeholder with
+  // their real name, so nobody types anyone else's details.
+  const invitePersonForGroup = async (label) => {
     setError(null);
-    const { data, error: err } = await supabase
+
+    const { data: contact, error: cErr } = await supabase
       .from("contacts")
-      .insert({ owner_id: userId, name: personName, phone: personPhone || null })
+      .insert({ owner_id: userId, name: label })
       .select()
       .single();
-    if (err) { setError(err.message); return null; }
+    if (cErr) { setError(cErr.message); return null; }
+
+    const { data: circle, error: circErr } = await supabase
+      .from("circles")
+      .insert({ owner_id: userId, name: label, contact_id: contact.id })
+      .select()
+      .single();
+    if (circErr) { setError(circErr.message); return null; }
+
+    const url = `${window.location.origin}/invite/${circle.invite_token}`;
+    const msg = `Join me on Rose, Bud, Thorn — I want to hear how your day's going: ${url}`;
+
+    if (navigator.share) {
+      try { await navigator.share({ text: msg }); }
+      catch { /* they backed out; the slot still stands */ }
+    } else {
+      await navigator.clipboard.writeText(msg);
+      setNotice("Invite link copied.");
+    }
+
     await loadPeople();
-    return data;
+    return contact;
   };
 
   const togglePick = (id) =>
@@ -1535,7 +1562,7 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
                 togglePick={togglePick}
                 onSave={saveGroup}
                 onRemove={() => removeGroup(g)}
-                onAddPerson={addPersonForGroup}
+                onInvitePerson={invitePersonForGroup}
               />
             )}
           </div>
@@ -1551,7 +1578,7 @@ function ProfileScreen({ userId, email, profile, onProfileChange, onBack, notifS
             togglePick={togglePick}
             onSave={saveGroup}
             onRemove={null}
-            onAddPerson={addPersonForGroup}
+            onInvitePerson={invitePersonForGroup}
           />
         )}
 
@@ -1973,23 +2000,38 @@ function SendScreen({ userId, groupId, profile, title, onDone, onHome, onProfile
           </button>
         )}
 
+        {/* Two real buttons, never a dead one. Whichever action is actually
+            available right now carries the dark fill. */}
         {isEmpty ? (
           <button onClick={shareGenericLink}
             className="w-full mt-6 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
             style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
             SHARE A LINK
           </button>
+        ) : picked.length === 0 ? (
+          <>
+            <p className="text-[12px] text-center leading-relaxed mt-6 mb-3"
+              style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
+              Tap a name above to send it straight to them.
+            </p>
+            <button onClick={shareGenericLink}
+              className="w-full px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+              style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
+              SHARE A LINK INSTEAD
+            </button>
+          </>
         ) : (
           <>
-            <button onClick={send} disabled={picked.length === 0 || sending}
-              className="w-full mt-5 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-40"
+            <button onClick={send} disabled={sending}
+              className="w-full mt-5 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide disabled:opacity-50"
               style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
-              {sending ? "SENDING…" : picked.length === 0 ? "PICK SOMEONE" : `SEND TO ${picked.length}`}
+              {sending ? "SENDING…" : `SEND TO ${picked.length}`}
             </button>
 
-            <button onClick={shareGenericLink} className="w-full mt-4 text-[11px] underline"
-              style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
-              or share a one-off link with someone new
+            <button onClick={shareGenericLink}
+              className="w-full mt-3 px-4 py-3 rounded-full text-[12px] font-bold tracking-wide"
+              style={{ background: "transparent", border: "1px solid rgba(43,42,31,0.3)", color: "rgba(43,42,31,0.7)", fontFamily: "'Special Elite', monospace" }}>
+              SHARE A LINK INSTEAD
             </button>
           </>
         )}
@@ -2805,13 +2847,14 @@ export default function App() {
     setProfile((p) => ({ ...(p || { id: session.user.id }), display_name: value, phone: phoneValue || null }));
   };
 
-  // Refresh the icon badge on load, so it is correct even for someone who
-  // opens the app and never taps through to the inbox.
+  // Refresh the icon badge on load and whenever the app comes back to the
+  // foreground, so it is correct even for someone who never taps through to
+  // the inbox.
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
 
-    (async () => {
+    const recount = async () => {
       const { data: memberships } = await supabase
         .from("group_members")
         .select("group_id, last_seen_at, groups(id, expires_at)")
@@ -2838,9 +2881,22 @@ export default function App() {
       }, 0);
 
       if (!cancelled) setUnreadCount(count);
-    })();
+    };
 
-    return () => { cancelled = true; };
+    // Opening the app deals with whatever was on the lock screen.
+    clearDeliveredNotifications().then(recount);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        clearDeliveredNotifications().then(recount);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [session, stage]);
 
   // First open after sign-in: ask about notifications once, and only once.
