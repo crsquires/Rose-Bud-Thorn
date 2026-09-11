@@ -621,12 +621,13 @@ function InstallSteps({ compact }) {
 }
 
 const INSTALL_PROMPTED_KEY = "rbt_install_prompted_v1";
+const INSTALL_HOME_SEEN_KEY = "rbt_install_home_seen_v1";
 
 // Shown once, right after someone posts their first check-in -- the moment
 // the payoff is concrete ("you'll know when they reply") rather than
 // abstract. Deliberately NOT shown on arrival: installing mid-invite opens
 // a fresh signed-out app at "/" and strands the check-in they came for.
-function InstallPrompt({ onContinue }) {
+function InstallOverlay({ variant, onClose }) {
   const [prompt, setPrompt] = useState(null);
 
   useEffect(() => {
@@ -640,22 +641,44 @@ function InstallPrompt({ onContinue }) {
     prompt.prompt();
     await prompt.userChoice;
     setPrompt(null);
-    onContinue();
+    onClose();
   };
 
-  return (
-    <div className="min-h-screen w-full flex flex-col items-center px-6 pt-12 pb-10" style={{ background: "#EFE9DA" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;1,500&family=Special+Elite&family=Permanent+Marker&display=swap');
-        @keyframes rbtNudge { 0%,100% { transform: translateY(0); } 50% { transform: translateY(9px); } }`}</style>
+  const posted = variant === "posted";
 
-      <div className="w-full flex-1 flex flex-col items-center text-center" style={{ maxWidth: "330px" }}>
-        <CheckCircle2 size={24} color="#4B5E33" style={{ marginBottom: "12px" }} />
-        <p className="text-[19px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
-          Your cards are posted
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6"
+      style={{
+        background: "rgba(43,42,31,0.45)",
+        backdropFilter: "blur(7px)",
+        WebkitBackdropFilter: "blur(7px)",
+      }}
+      onClick={onClose}
+    >
+      <style>{`@keyframes rbtNudge { 0%,100% { transform: translate(0,0); } 50% { transform: translate(4px,8px); } }
+        @keyframes rbtRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full rounded-3xl px-6 py-7 text-center"
+        style={{
+          maxWidth: "330px",
+          background: "#EFE9DA",
+          boxShadow: "0 24px 60px -18px rgba(0,0,0,0.5)",
+          animation: "rbtRise 260ms cubic-bezier(.2,.8,.2,1)",
+        }}
+      >
+        {posted && <CheckCircle2 size={22} color="#4B5E33" style={{ margin: "0 auto 10px" }} />}
+
+        <p className="text-[18px] mb-3" style={{ color: hexToRgba(ENTRY_INK, 0.85), fontFamily: "'Permanent Marker', cursive" }}>
+          {posted ? "Your cards are posted" : "Keep it one tap away"}
         </p>
-        <p className="text-[13px] leading-relaxed mb-7" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif" }}>
-          Add Rose, Bud, Thorn to your home screen and you'll know the moment they write back — without signing in
-          again or waiting on a text.
+
+        <p className="text-[13px] leading-relaxed mb-6" style={{ color: "rgba(43,42,31,0.7)", fontFamily: "'Fraunces', serif" }}>
+          {posted
+            ? "Add Rose, Bud, Thorn to your home screen and you'll know the moment they write back — without signing in again or waiting on a text."
+            : "Links open in Safari, where you're signed out every time. On your home screen you stay signed in, and check-ins arrive as notifications."}
         </p>
 
         {prompt ? (
@@ -665,23 +688,27 @@ function InstallPrompt({ onContinue }) {
             ADD TO HOME SCREEN
           </button>
         ) : (
-          <div className="w-full rounded-2xl px-5 py-4 text-left" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.14)" }}>
+          <div className="rounded-2xl px-4 py-3 text-left" style={{ background: "#fff", border: "1px solid rgba(43,42,31,0.12)" }}>
             <InstallSteps compact />
           </div>
         )}
 
-        <button onClick={onContinue} className="mt-6 text-[11px] underline"
-          style={{ color: "rgba(43,42,31,0.45)", fontFamily: "'Special Elite', monospace" }}>
-          skip for now
+        <button onClick={onClose} className="mt-5 text-[11px] underline"
+          style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
+          {posted ? "skip for now" : "not now"}
         </button>
       </div>
 
+      {/* Points at Safari's ••• menu, which sits at the bottom RIGHT. */}
       {!prompt && isIOS() && (
-        <div className="flex flex-col items-center pb-2" style={{ animation: "rbtNudge 1.6s ease-in-out infinite" }}>
-          <p className="text-[11px] mb-1" style={{ color: "rgba(43,42,31,0.5)", fontFamily: "'Special Elite', monospace" }}>
-            SHARE MENU IS DOWN HERE
+        <div
+          className="absolute flex flex-col items-end"
+          style={{ right: "18px", bottom: "calc(10px + env(safe-area-inset-bottom, 0px))", animation: "rbtNudge 1.5s ease-in-out infinite" }}
+        >
+          <p className="text-[10px] mb-1 text-right" style={{ color: "#EFE9DA", fontFamily: "'Special Elite', monospace", textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
+            TAP THE ••• DOWN HERE
           </p>
-          <span style={{ fontSize: "26px", lineHeight: 1, color: "rgba(43,42,31,0.45)" }}>↓</span>
+          <span style={{ fontSize: "30px", lineHeight: 1, color: "#EFE9DA", textShadow: "0 1px 4px rgba(0,0,0,0.5)" }}>↘</span>
         </div>
       )}
     </div>
@@ -2916,17 +2943,26 @@ export default function App() {
   };
 
   const [sendOrigin, setSendOrigin] = useState("flow");
-  const [afterInstall, setAfterInstall] = useState("send");
+  const [installOverlay, setInstallOverlay] = useState(null); // "posted" | "home" | null
 
   const shouldOfferInstall = () => {
     if (isStandalone()) return false;
     try { return !window.localStorage.getItem(INSTALL_PROMPTED_KEY); } catch { return true; }
   };
 
-  const dismissInstallPrompt = () => {
-    try { window.localStorage.setItem(INSTALL_PROMPTED_KEY, "1"); } catch {}
-    setStage(afterInstall);
+  const closeInstallOverlay = () => {
+    const key = installOverlay === "home" ? INSTALL_HOME_SEEN_KEY : INSTALL_PROMPTED_KEY;
+    try { window.localStorage.setItem(key, "1"); } catch {}
+    setInstallOverlay(null);
   };
+
+  // First time they land on home, once only.
+  useEffect(() => {
+    if (stage !== "home" || installOverlay || isStandalone()) return;
+    let seen = null;
+    try { seen = window.localStorage.getItem(INSTALL_HOME_SEEN_KEY); } catch {}
+    if (!seen) setInstallOverlay("home");
+  }, [stage]);
 
   // Re-open the send screen for a check-in you already posted.
   const sendMore = (group) => {
@@ -3012,13 +3048,8 @@ export default function App() {
 
     setGroupId(targetGroupId);
     setSaving(false);
-    const next = joinedExisting ? "home" : "send";
-    if (shouldOfferInstall()) {
-      setAfterInstall(next);
-      setStage("install");
-    } else {
-      setStage(next);
-    }
+    setStage(joinedExisting ? "home" : "send");
+    if (shouldOfferInstall()) setInstallOverlay("posted");
   };
 
   const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -3092,10 +3123,6 @@ export default function App() {
     );
   }
 
-  if (stage === "install") {
-    return <InstallPrompt onContinue={dismissInstallPrompt} />;
-  }
-
   if (stage === "kind") {
     return (
       <CheckInKind
@@ -3132,6 +3159,8 @@ export default function App() {
 
   if (stage === "send") {
     return (
+      <>
+      {installOverlay && <InstallOverlay variant={installOverlay} onClose={closeInstallOverlay} />}
       <SendScreen
         userId={session.user.id}
         groupId={groupId}
@@ -3144,19 +3173,23 @@ export default function App() {
         onHome={() => setStage("home")}
         onProfile={() => setStage("profile")}
       />
+      </>
     );
   }
 
   return (
-    <DeskHome
-      filledCount={filledCount}
-      waitingCount={0}
-      readCount={0}
-      profile={profile}
-      onOpenCards={startCheckIn}
-      onOpenInbox={() => setStage("inbox")}
-      onOpenProfile={() => setStage("profile")}
-      saveError={saveError}
-    />
+    <>
+      {installOverlay && <InstallOverlay variant={installOverlay} onClose={closeInstallOverlay} />}
+      <DeskHome
+        filledCount={filledCount}
+        waitingCount={0}
+        readCount={0}
+        profile={profile}
+        onOpenCards={startCheckIn}
+        onOpenInbox={() => setStage("inbox")}
+        onOpenProfile={() => setStage("profile")}
+        saveError={saveError}
+      />
+    </>
   );
 }
