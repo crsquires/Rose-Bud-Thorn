@@ -1013,8 +1013,18 @@ function GroupEditor({ pill, contacts, name, setName, picks, togglePick, onSave,
           <p className="text-[11px] leading-relaxed mb-2" style={{ color: "rgba(43,42,31,0.55)", fontFamily: "'Fraunces', serif" }}>
             Optional — a name just helps you recognise the slot until they join.
           </p>
-          <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder='Label, e.g. "Tand"' maxLength={40}
-            className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-2" style={pill} />
+          <form onSubmit={(e) => e.preventDefault()}>
+            <input
+              value={pName}
+              onChange={(e) => setPName(e.target.value)}
+              placeholder="Name (tap AutoFill Contact above the keyboard)"
+              maxLength={40}
+              name="name"
+              autoComplete="name"
+              className="w-full px-4 py-2.5 rounded-full text-[13px] outline-none mb-2"
+              style={pill}
+            />
+          </form>
           <button onClick={add} disabled={inviting}
             className="w-full px-3 py-2 rounded-full text-[11px] font-bold tracking-wide disabled:opacity-50"
             style={{ background: "#2B2A1F", color: "#EFE9DA", fontFamily: "'Special Elite', monospace" }}>
